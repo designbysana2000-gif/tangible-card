@@ -86,20 +86,22 @@ class TangibleWorld {
     return group;
   }
 
-  // Finds the first node whose name matches (or starts with) any of the
-  // given candidate names, and relabels it so our tap logic can find it
-  // by the standard name regardless of what it's called in the raw file.
+  // Finds every node whose name matches (or starts with) any of the given
+  // candidate names, and relabels all of them. Some exports have a
+  // duplicate or wrapper/child pair sharing a similar name (e.g.
+  // "seed_fbx" and "seed_fbx.001") — renaming only the first one risks
+  // tagging an invisible helper node instead of the one actually on
+  // screen, which is why we tag every match rather than stopping early.
   _renameFirstMatch(root, candidates, standardName) {
-    let found = null;
+    let matchCount = 0;
     root.traverse((obj) => {
-      if (found || !obj.name) return;
+      if (!obj.name) return;
       if (candidates.some((c) => obj.name === c || obj.name.startsWith(c))) {
-        found = obj;
+        obj.name = standardName;
+        matchCount++;
       }
     });
-    if (found) {
-      found.name = standardName;
-    } else {
+    if (matchCount === 0) {
       console.warn(`Could not find a node matching [${candidates.join(", ")}] for "${standardName}" — tapping it won't work until the name is fixed.`);
     }
   }
@@ -297,6 +299,16 @@ class TangibleWorld {
     window.addEventListener("touchstart", handleTap, { passive: true });
   }
 
+  // Returns every descendant with the given name, since a model can end
+  // up with more than one node sharing a name after our renaming pass.
+  _getAllNamed(root, name) {
+    const found = [];
+    root.traverse((obj) => {
+      if (obj.name === name) found.push(obj);
+    });
+    return found;
+  }
+
   _findNamed(obj) {
     let o = obj;
     while (o) {
@@ -327,12 +339,12 @@ class TangibleWorld {
     if (this._transitioning || this.currentRoom !== "tech") return;
     this._transitioning = true;
 
-    const seed = this.techRoom.getObjectByName("seed");
+    const seeds = this._getAllNamed(this.techRoom, "seed");
     this._seedFall = {
       start: this._clock.getElapsedTime(),
       duration: 0.45,
-      target: seed,
-      startY: seed ? seed.position.y : 0,
+      targets: seeds,
+      startYs: seeds.map((s) => s.position.y),
       done: false,
     };
   }
@@ -373,12 +385,12 @@ class TangibleWorld {
 
         // Reset the seed and tree so the whole sequence plays again
         // cleanly next time the seed is tapped.
-        const seed = this.techRoom.getObjectByName("seed");
-        if (seed) {
+        const seeds = this._getAllNamed(this.techRoom, "seed");
+        seeds.forEach((seed) => {
           seed.visible = true;
           seed.scale.set(1, 1.4, 1);
           seed.position.y = 0.28;
-        }
+        });
         const tree = this.floranaRoom.getObjectByName("tree");
         if (tree) tree.scale.setScalar(0.001);
         this._treeAnim = null;
@@ -410,15 +422,14 @@ class TangibleWorld {
 
     if (this._seedFall && !this._seedFall.done) {
       const k = Math.min(1, (t - this._seedFall.start) / this._seedFall.duration);
-      const seed = this._seedFall.target;
-      if (seed) {
-        seed.position.y = this._seedFall.startY - k * 0.18;
-        const s = Math.max(0, 1 - k) * 1;
+      const s = Math.max(0, 1 - k);
+      this._seedFall.targets.forEach((seed, i) => {
+        seed.position.y = this._seedFall.startYs[i] - k * 0.18;
         seed.scale.set(s, s * 1.4, s);
-      }
+      });
       if (k >= 1) {
         this._seedFall.done = true;
-        if (seed) seed.visible = false;
+        this._seedFall.targets.forEach((seed) => (seed.visible = false));
         this._startCapsuleTurn();
       }
     }
