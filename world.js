@@ -67,7 +67,7 @@ class TangibleWorld {
     // The model's own "forward" direction from export doesn't match what
     // we assumed — nudge it to face the camera. Try 90°-increment values
     // here (Math.PI/2, Math.PI, -Math.PI/2) until the open front faces you.
-    group.rotation.y = Math.PI / 2;
+    group.rotation.y = -Math.PI / 2;
 
     // Your GLB already has these pieces named — we just point our standard
     // tap-target names (contactCard, coin, seed) at whichever real node
