@@ -145,26 +145,74 @@ class TangibleWorld {
   }
 
   /* ============================================================
-     Public: start in test mode (no camera, fixed orbit-free view)
+     Public: start in test mode.
+     Tries to open the phone's back camera as a live passthrough
+     background so the room feels like it's sitting in front of you,
+     with no card or image-tracking required. Falls back to a plain
+     dark background if no camera is available (e.g. on a desktop
+     with no webcam, or if permission is denied).
      ============================================================ */
-  startTestMode(container) {
+  async startTestMode(container) {
     this.mode = "test";
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.domElement.style.touchAction = "none";
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x14130f);
+
+    await this._tryStartCameraPassthrough(container);
+    if (!this._passthroughActive) {
+      this.scene.background = new THREE.Color(0x14130f);
+    }
 
     this.camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 20);
-    this.camera.position.set(0, 0.85, 1.15);
+    // Slightly lower and closer than the old diorama view so the room
+    // reads as "sitting on the surface in front of you" over live video.
+    this.camera.position.set(0, 0.55, 0.9);
     this.camera.lookAt(0, 0.2, -0.3);
 
     this._buildScene(this.scene);
     this._bindPointer(this.renderer.domElement, this.camera);
     window.addEventListener("resize", () => this._onResize());
     this._animate();
+  }
+
+  async _tryStartCameraPassthrough(container) {
+    this._passthroughActive = false;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      video.setAttribute("playsinline", "");
+      video.muted = true;
+      await video.play();
+
+      video.style.position = "fixed";
+      video.style.inset = "0";
+      video.style.width = "100%";
+      video.style.height = "100%";
+      video.style.objectFit = "cover";
+      video.style.zIndex = "0";
+      container.style.background = "transparent";
+      container.insertBefore(video, container.firstChild);
+      this.renderer.domElement.style.position = "relative";
+      this.renderer.domElement.style.zIndex = "1";
+
+      this._videoEl = video;
+      this._passthroughActive = true;
+    } catch (err) {
+      // Camera denied or unavailable — silently fall back to the plain
+      // background set by the caller. This is expected on desktops
+      // without a webcam, so it isn't logged as an error to the user.
+      this._passthroughActive = false;
+    }
   }
 
   /* ============================================================
@@ -185,11 +233,21 @@ class TangibleWorld {
     this._mindar = mindarThree;
     const { renderer, scene, camera } = mindarThree;
     this.renderer = renderer;
+    this.renderer.domElement.style.touchAction = "none";
     this.scene = scene;
     this.camera = camera;
 
     const anchor = mindarThree.addAnchor(0);
-    this._buildScene(anchor.group);
+
+    // The tracked image lies flat on the table with its anchor's Z axis
+    // pointing straight up off the card. Our room is modeled Y-up (like
+    // a normal room), so we rotate the whole thing -90° on X to stand it
+    // up out of the card's plane instead of lying flat inside it.
+    const stageUpright = new THREE.Group();
+    stageUpright.rotation.x = -Math.PI / 2;
+    anchor.group.add(stageUpright);
+    this._buildScene(stageUpright);
+
     this._bindPointer(renderer.domElement, camera);
 
     await mindarThree.start();
@@ -198,12 +256,16 @@ class TangibleWorld {
 
   /* ============================================================
      Pointer / tap interaction
+     Uses pointerdown (covers touch + mouse) with preventDefault so a
+     tap can't get swallowed by the browser as a scroll/zoom gesture.
      ============================================================ */
   _bindPointer(domElement, camera) {
-    domElement.addEventListener("pointerdown", (e) => {
+    const handleTap = (e) => {
+      e.preventDefault();
+      const point = e.changedTouches ? e.changedTouches[0] : e;
       const rect = domElement.getBoundingClientRect();
-      this._pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      this._pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      this._pointer.x = ((point.clientX - rect.left) / rect.width) * 2 - 1;
+      this._pointer.y = -((point.clientY - rect.top) / rect.height) * 2 + 1;
       this._raycaster.setFromCamera(this._pointer, camera);
 
       const hits = this._raycaster.intersectObjects(
@@ -218,7 +280,10 @@ class TangibleWorld {
       if (hit.name === "contactCard") this._openContact();
       else if (hit.name === "coin") this.openCoinPopup();
       else if (hit.name === "plant") this._transitionToFlorana();
-    });
+    };
+
+    domElement.addEventListener("pointerdown", handleTap, { passive: false });
+    domElement.addEventListener("touchstart", handleTap, { passive: false });
   }
 
   _findNamed(obj) {
