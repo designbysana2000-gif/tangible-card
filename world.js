@@ -47,6 +47,10 @@ class TangibleWorld {
     // Back-to-back: Florana's opening faces the opposite direction from
     // the Tech Room's, sharing the same central spine.
     this.floranaRoom.rotation.y = Math.PI;
+    // Hidden until the seed is planted and the capsule turns — this keeps
+    // its (currently backless, placeholder) geometry from peeking through
+    // before it's actually meant to be seen.
+    this.floranaRoom.visible = false;
 
     this.capsule.add(this.techRoom, this.floranaRoom);
     root.add(this.capsule);
@@ -295,6 +299,9 @@ class TangibleWorld {
       if (hit.name === "contactCard") this._openContact();
       else if (hit.name === "coin") this.openCoinPopup();
       else if (hit.name === "seed") this._transitionToFlorana();
+      else if (hit.name === "tree" && this.currentRoom === "florana" && this._treeAnim && this._treeAnim.done) {
+        this.goBackToTechRoom();
+      }
     };
 
     // Bound to window, not domElement: MindAR (and some browser chrome)
@@ -309,7 +316,7 @@ class TangibleWorld {
   _findNamed(obj) {
     let o = obj;
     while (o) {
-      if (["contactCard", "coin", "seed"].includes(o.name)) return o;
+      if (["contactCard", "coin", "seed", "tree"].includes(o.name)) return o;
       o = o.parent;
     }
     return null;
@@ -353,6 +360,10 @@ class TangibleWorld {
       onDone: () => {
         this.currentRoom = "florana";
         this.onRoomChange("florana");
+        // The tech room has now fully turned away — hide it outright so
+        // it's genuinely gone, not just facing the wrong direction.
+        this.techRoom.visible = false;
+        this.floranaRoom.visible = true;
         this._startTreeGrowth();
         this._transitioning = false;
       },
@@ -363,6 +374,8 @@ class TangibleWorld {
     if (this.currentRoom !== "florana" || this._transitioning) return;
     this._transitioning = true;
     document.getElementById("floranaSign").classList.remove("show");
+    // Bring the tech room back into existence for the return trip.
+    this.techRoom.visible = true;
 
     this._spin = {
       start: this._clock.getElapsedTime(),
@@ -371,6 +384,8 @@ class TangibleWorld {
       onDone: () => {
         this.currentRoom = "tech";
         this.onRoomChange("tech");
+        // Florana has now fully turned away — hide it outright.
+        this.floranaRoom.visible = false;
 
         // Reset the seed and tree so the whole sequence plays again
         // cleanly next time the seed is tapped.
