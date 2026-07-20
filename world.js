@@ -232,11 +232,6 @@ class TangibleWorld {
     const mindarThree = new MindARThree({
       container,
       imageTargetSrc: "./targets.mind",
-      // Heavier built-in smoothing at the source, before our own damping
-      // below even sees the pose. Trades a small bit of responsiveness
-      // for a much steadier lock.
-      filterMinCF: 0.00005,
-      filterBeta: 5,
     });
     this._mindar = mindarThree;
     const { renderer, scene, camera } = mindarThree;
