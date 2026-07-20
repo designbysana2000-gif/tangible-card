@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Tangible Studios — AR Business Card</title>
+<style>
+  :root{
+    --ink:#1c1b19;
+    --paper:#f4f1ea;
+    --clay:#c9744f;
+    --moss:#5c6b4f;
+    --line: rgba(28,27,25,0.18);
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; background:#0d0d0c; color:var(--paper);
+    font-family: -apple-system, "Inter", "Helvetica Neue", Arial, sans-serif; }
+
+  #app { position:fixed; inset:0; }
+
+  /* ---------- Landing / mode select ---------- */
+  #landing {
+    position:fixed; inset:0; z-index:50; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:32px;
+    background: radial-gradient(120% 120% at 50% 0%, #1c1b19 0%, #0d0d0c 60%);
+  }
+  #landing .eyebrow { letter-spacing:.18em; text-transform:uppercase; font-size:11px; color:var(--clay); margin-bottom:14px; }
+  #landing h1 { font-size:26px; margin:0 0 10px; font-weight:600; }
+  #landing p { max-width:340px; color:#c9c6bd; font-size:14px; line-height:1.5; margin:0 0 28px; }
+  .btn {
+    appearance:none; border:1px solid var(--line); background:transparent; color:var(--paper);
+    padding:14px 22px; border-radius:2px; font-size:14px; letter-spacing:.02em; cursor:pointer;
+    min-width:240px; margin-bottom:12px; transition: background .15s, border-color .15s;
+  }
+  .btn:hover { border-color: var(--clay); }
+  .btn.primary { background: var(--clay); border-color: var(--clay); color:#161512; font-weight:600; }
+  .btn.primary:hover { background:#d9865f; }
+
+  /* ---------- Instruction screen (AR mode) ---------- */
+  #instructions {
+    position:fixed; inset:0; z-index:40; display:none; flex-direction:column;
+    align-items:center; justify-content:flex-end; padding:28px; text-align:center;
+    background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.55) 55%, rgba(0,0,0,.85) 100%);
+  }
+  #instructions .card-diagram {
+    width:120px; height:70px; border:2px solid var(--paper); border-radius:6px; margin-bottom:18px;
+    position:relative; opacity:.9;
+  }
+  #instructions .card-diagram::after {
+    content:""; position:absolute; inset:10px; border:1px dashed var(--clay); border-radius:2px;
+  }
+  #instructions h2 { font-size:17px; margin:0 0 6px; }
+  #instructions p { font-size:13px; color:#d8d5cc; max-width:300px; margin:0 0 20px; line-height:1.5; }
+
+  /* ---------- HUD (shared) ---------- */
+  #hud { position:fixed; inset:0; z-index:20; pointer-events:none; display:none; }
+  #hud .top-bar {
+    position:absolute; top:0; left:0; right:0; padding:14px 16px; display:flex;
+    align-items:center; justify-content:space-between; pointer-events:auto;
+  }
+  #hud .brand { font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--paper); opacity:.85; }
+  #backBtn {
+    display:none; pointer-events:auto; background:rgba(20,19,17,.6); border:1px solid var(--line);
+    color:var(--paper); padding:8px 14px; border-radius:20px; font-size:12px; cursor:pointer;
+    backdrop-filter: blur(6px);
+  }
+  #hint {
+    position:absolute; bottom:22px; left:50%; transform:translateX(-50%);
+    font-size:12px; color:#e7e4db; background:rgba(20,19,17,.55); padding:8px 14px;
+    border-radius:20px; pointer-events:none; backdrop-filter: blur(6px); transition:opacity .3s;
+  }
+
+  /* ---------- Coin popup ---------- */
+  #coinPopup {
+    position:fixed; left:50%; bottom:0; transform:translate(-50%, 100%); z-index:30;
+    width:min(360px, 88vw); background:var(--paper); color:var(--ink); border-radius:14px 14px 0 0;
+    padding:22px 22px 28px; transition: transform .35s cubic-bezier(.2,.8,.2,1); pointer-events:auto;
+  }
+  #coinPopup.open { transform:translate(-50%, 0); }
+  #coinPopup .eyebrow { font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--clay); margin-bottom:8px; }
+  #coinPopup h3 { margin:0 0 8px; font-size:18px; }
+  #coinPopup p { margin:0 0 4px; font-size:13px; line-height:1.5; color:#4a473f; }
+  #coinPopup .closeRow { text-align:right; margin-top:14px; }
+  #coinPopup .closeRow button {
+    border:none; background:none; color:var(--ink); font-size:12px; text-decoration:underline; cursor:pointer;
+  }
+
+  /* ---------- Florana sign overlay (HTML, appears after tree anim) ---------- */
+  #floranaSign {
+    position:fixed; left:50%; top:50%; transform:translate(-50%,-50%) scale(.92); z-index:30;
+    width:min(320px, 84vw); background:var(--paper); color:var(--ink); border-radius:10px;
+    padding:26px 22px; text-align:center; opacity:0; pointer-events:none;
+    transition: opacity .5s ease, transform .5s ease;
+  }
+  #floranaSign.show { opacity:1; transform:translate(-50%,-50%) scale(1); pointer-events:auto; }
+  #floranaSign .eyebrow { font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--moss); margin-bottom:8px; }
+  #floranaSign h3 { margin:0 0 8px; font-size:19px; }
+  #floranaSign p { margin:0; font-size:13px; line-height:1.55; color:#4a473f; }
+
+  #loading {
+    position:fixed; inset:0; z-index:60; display:none; align-items:center; justify-content:center;
+    background:#0d0d0c; color:#c9c6bd; font-size:13px; letter-spacing:.05em;
+  }
+
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<!-- LANDING -->
+<div id="landing">
+  <div class="eyebrow">Tangible Studios</div>
+  <h1>Enter our world</h1>
+  <p>This card opens a small studio, built to scale, that lives on top of the physical card in your hand.</p>
+  <button class="btn primary" id="startARBtn">Point camera at the card</button>
+  <button class="btn" id="startTestBtn">Test without the card</button>
+</div>
+
+<!-- AR INSTRUCTIONS -->
+<div id="instructions">
+  <div class="card-diagram"></div>
+  <h2>Place the card face-up</h2>
+  <p>Set it on a flat surface, then point your camera down at the front of the card until the studio appears.</p>
+  <button class="btn primary" id="gotItBtn">Got it</button>
+</div>
+
+<div id="loading">preparing the studio…</div>
+
+<!-- SHARED HUD -->
+<div id="hud">
+  <div class="top-bar">
+    <div class="brand">Tangible Studios</div>
+    <button id="backBtn">← Back to studio</button>
+  </div>
+  <div id="hint">Tap the coin, the card, or the plant</div>
+</div>
+
+<!-- COIN POPUP -->
+<div id="coinPopup">
+  <div class="eyebrow">Tangible Studios</div>
+  <h3>Design-led. Build-obsessed.</h3>
+  <p>We're a small studio designing and building interactive products — AR, web, and the space between them.</p>
+  <p>designbysana.com</p>
+  <div class="closeRow"><button id="closeCoinBtn">Close</button></div>
+</div>
+
+<!-- FLORANA SIGN -->
+<div id="floranaSign">
+  <div class="eyebrow">Florana</div>
+  <h3>Coming soon</h3>
+  <p>An AR wellness app where breathing grows a living plant. In development now.</p>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { world } from "./world.js";
+
+/* ---------------- Mode wiring ---------------- */
+const landing = document.getElementById("landing");
+const instructions = document.getElementById("instructions");
+const loading = document.getElementById("loading");
+const hud = document.getElementById("hud");
+const backBtn = document.getElementById("backBtn");
+const hint = document.getElementById("hint");
+
+document.getElementById("startTestBtn").addEventListener("click", () => {
+  landing.classList.add("hidden");
+  hud.style.display = "block";
+  world.startTestMode(document.getElementById("app"));
+});
+
+document.getElementById("startARBtn").addEventListener("click", () => {
+  landing.classList.add("hidden");
+  instructions.style.display = "flex";
+});
+
+document.getElementById("gotItBtn").addEventListener("click", async () => {
+  instructions.style.display = "none";
+  loading.style.display = "flex";
+  hud.style.display = "block";
+  try {
+    await world.startARMode(document.getElementById("app"));
+  } catch (err) {
+    console.error(err);
+    loading.textContent = "Camera or targets.mind not available — see README.";
+    return;
+  }
+  loading.style.display = "none";
+});
+
+backBtn.addEventListener("click", () => {
+  world.goBackToTechRoom();
+});
+
+world.onRoomChange = (room) => {
+  backBtn.style.display = room === "florana" ? "block" : "none";
+  hint.style.opacity = room === "florana" ? "0" : "1";
+};
+
+document.getElementById("closeCoinBtn").addEventListener("click", () => {
+  world.closeCoinPopup();
+});
+</script>
+</body>
+</html>
