@@ -38,11 +38,11 @@ class TangibleWorld {
      inside one capsule group. Whichever one currently faces the camera is
      simply whichever way the capsule is rotated — there's no hide/show.
      ============================================================ */
-  _buildScene(root) {
+  async _buildScene(root) {
     this.capsule = new THREE.Group();
     this.capsule.name = "capsule";
 
-    this.techRoom = this._buildTechRoom();
+    this.techRoom = await this._buildTechRoom();
     this.floranaRoom = this._buildFloranaRoom();
     // Back-to-back: Florana's opening faces the opposite direction from
     // the Tech Room's, sharing the same central spine.
@@ -56,61 +56,23 @@ class TangibleWorld {
     root.add(this.capsule);
   }
 
-  _buildTechRoom() {
-    const group = new THREE.Group();
+  async _buildTechRoom() {
+    const { GLTFLoader } = await import(
+      "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
+    );
+    const loader = new GLTFLoader();
+    const gltf = await loader.loadAsync("./tech_room.glb");
+    const group = gltf.scene;
     group.name = "techRoom";
 
-    // PLACEHOLDER GEOMETRY — swap for tech_room.glb
-    const floor = new THREE.Mesh(
-      new THREE.BoxGeometry(1.6, 0.04, 1.6),
-      new THREE.MeshStandardMaterial({ color: 0x1c1b19, roughness: 0.9 })
-    );
-    floor.position.y = -0.02;
-    group.add(floor);
-
-    const backWall = new THREE.Mesh(
-      new THREE.BoxGeometry(1.6, 0.9, 0.03),
-      new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 1 })
-    );
-    backWall.position.set(0, 0.45, -0.78);
-    group.add(backWall);
-
-    const desk = new THREE.Mesh(
-      new THREE.BoxGeometry(1.1, 0.05, 0.5),
-      new THREE.MeshStandardMaterial({ color: 0x8a6c53, roughness: 0.6 })
-    );
-    desk.position.set(0, 0.22, -0.35);
-    group.add(desk);
-
-    // Contact Us card
-    const contactCard = new THREE.Mesh(
-      new THREE.BoxGeometry(0.22, 0.13, 0.01),
-      new THREE.MeshStandardMaterial({ color: 0xc9744f, roughness: 0.4 })
-    );
-    contactCard.name = "contactCard";
-    contactCard.position.set(-0.35, 0.3, -0.35);
-    contactCard.rotation.x = -0.15;
-    group.add(contactCard);
-
-    // Coin
-    const coin = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.07, 0.07, 0.02, 32),
-      new THREE.MeshStandardMaterial({ color: 0xd9b568, metalness: 0.6, roughness: 0.25 })
-    );
-    coin.name = "coin";
-    coin.rotation.z = Math.PI / 2;
-    coin.position.set(0.35, 0.28, -0.35);
-    group.add(coin);
-
-    // Seed — falls and disappears when tapped, then the capsule turns
-    const seed = new THREE.Mesh(
-      new THREE.SphereGeometry(0.045, 16, 16),
-      new THREE.MeshStandardMaterial({ color: 0x5c6b4f, roughness: 0.6 })
-    );
-    seed.scale.set(1, 1.4, 1);
-    seed.name = "seed";
-    seed.position.set(0, 0.28, -0.55);
-    group.add(seed);
+    // Your GLB already has these pieces named — we just point our standard
+    // tap-target names (contactCard, coin, seed) at whichever real node
+    // matches, so the existing tap/animation code doesn't need to change
+    // at all. If the model gets re-exported later with different names,
+    // update the strings on the right below.
+    this._renameFirstMatch(group, ["Card_Export", "Card_GEo1"], "contactCard");
+    this._renameFirstMatch(group, ["CoinCapsule"], "coin");
+    this._renameFirstMatch(group, ["seed_fbx"], "seed");
 
     const light = new THREE.PointLight(0xffffff, 1.1, 3);
     light.position.set(0.3, 0.8, 0.3);
@@ -118,6 +80,24 @@ class TangibleWorld {
     group.add(new THREE.AmbientLight(0xffffff, 0.5));
 
     return group;
+  }
+
+  // Finds the first node whose name matches (or starts with) any of the
+  // given candidate names, and relabels it so our tap logic can find it
+  // by the standard name regardless of what it's called in the raw file.
+  _renameFirstMatch(root, candidates, standardName) {
+    let found = null;
+    root.traverse((obj) => {
+      if (found || !obj.name) return;
+      if (candidates.some((c) => obj.name === c || obj.name.startsWith(c))) {
+        found = obj;
+      }
+    });
+    if (found) {
+      found.name = standardName;
+    } else {
+      console.warn(`Could not find a node matching [${candidates.join(", ")}] for "${standardName}" — tapping it won't work until the name is fixed.`);
+    }
   }
 
   _buildFloranaRoom() {
@@ -186,7 +166,7 @@ class TangibleWorld {
     this.camera.position.set(0, 0.55, 0.9);
     this.camera.lookAt(0, 0.2, -0.3);
 
-    this._buildScene(this.scene);
+    await this._buildScene(this.scene);
     this._bindPointer(this.renderer.domElement, this.camera);
     window.addEventListener("resize", () => this._onResize());
     this._animate();
@@ -266,7 +246,7 @@ class TangibleWorld {
     // physical object is being tracked.
     stageUpright.scale.setScalar(0.35);
     anchor.group.add(stageUpright);
-    this._buildScene(stageUpright);
+    await this._buildScene(stageUpright);
 
     this._bindPointer(renderer.domElement, camera);
 
