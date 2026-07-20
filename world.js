@@ -245,6 +245,13 @@ class TangibleWorld {
     // up out of the card's plane instead of lying flat inside it.
     const stageUpright = new THREE.Group();
     stageUpright.rotation.x = Math.PI / 2;
+    // Scaled down substantially: the room was originally sized assuming a
+    // business-card-width tracked image. Larger tracked images (like an
+    // envelope) make MindAR render everything bigger in real-world terms,
+    // which can put the camera inside the geometry at normal viewing
+    // distance. This keeps the room comfortably small no matter what
+    // physical object is being tracked.
+    stageUpright.scale.setScalar(0.35);
     anchor.group.add(stageUpright);
     this._buildScene(stageUpright);
 
