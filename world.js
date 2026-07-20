@@ -203,6 +203,11 @@ class TangibleWorld {
       video.style.height = "100%";
       video.style.objectFit = "cover";
       video.style.zIndex = "0";
+      // FIX: without this, the fixed/full-screen video can sit above the
+      // canvas in the stacking order on some mobile browsers and silently
+      // swallow every tap before it ever reaches the raycaster. The video
+      // is purely a visual backdrop, so it should never intercept input.
+      video.style.pointerEvents = "none";
       container.style.background = "transparent";
       container.insertBefore(video, container.firstChild);
       this.renderer.domElement.style.position = "relative";
@@ -266,8 +271,13 @@ class TangibleWorld {
 
   /* ============================================================
      Pointer / tap interaction
-     Uses pointerdown (covers touch + mouse) with preventDefault so a
-     tap can't get swallowed by the browser as a scroll/zoom gesture.
+     Uses pointerdown alone (it covers touch + mouse + pen on all
+     modern mobile browsers) with preventDefault so a tap can't get
+     swallowed by the browser as a scroll/zoom gesture.
+     NOTE: previously this also listened for touchstart on the same
+     handler. On mobile, pointerdown and touchstart both fire for a
+     single tap, so the handler was running twice per tap — removed
+     to avoid double-firing / flaky hit detection.
      ============================================================ */
   _bindPointer(domElement, camera) {
     const handleTap = (e) => {
@@ -293,7 +303,6 @@ class TangibleWorld {
     };
 
     domElement.addEventListener("pointerdown", handleTap, { passive: false });
-    domElement.addEventListener("touchstart", handleTap, { passive: false });
   }
 
   _findNamed(obj) {
