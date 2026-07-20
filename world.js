@@ -203,11 +203,6 @@ class TangibleWorld {
       video.style.height = "100%";
       video.style.objectFit = "cover";
       video.style.zIndex = "0";
-      // FIX: without this, the fixed/full-screen video can sit above the
-      // canvas in the stacking order on some mobile browsers and silently
-      // swallow every tap before it ever reaches the raycaster. The video
-      // is purely a visual backdrop, so it should never intercept input.
-      video.style.pointerEvents = "none";
       container.style.background = "transparent";
       container.insertBefore(video, container.firstChild);
       this.renderer.domElement.style.position = "relative";
@@ -271,17 +266,11 @@ class TangibleWorld {
 
   /* ============================================================
      Pointer / tap interaction
-     Uses pointerdown alone (it covers touch + mouse + pen on all
-     modern mobile browsers) with preventDefault so a tap can't get
-     swallowed by the browser as a scroll/zoom gesture.
-     NOTE: previously this also listened for touchstart on the same
-     handler. On mobile, pointerdown and touchstart both fire for a
-     single tap, so the handler was running twice per tap — removed
-     to avoid double-firing / flaky hit detection.
+     Uses pointerdown (covers touch + mouse) with preventDefault so a
+     tap can't get swallowed by the browser as a scroll/zoom gesture.
      ============================================================ */
   _bindPointer(domElement, camera) {
     const handleTap = (e) => {
-      e.preventDefault();
       const point = e.changedTouches ? e.changedTouches[0] : e;
       const rect = domElement.getBoundingClientRect();
       this._pointer.x = ((point.clientX - rect.left) / rect.width) * 2 - 1;
@@ -302,7 +291,13 @@ class TangibleWorld {
       else if (hit.name === "plant") this._transitionToFlorana();
     };
 
-    domElement.addEventListener("pointerdown", handleTap, { passive: false });
+    // Bound to window, not domElement: MindAR (and some browser chrome)
+    // can place invisible overlay layers on top of the render canvas for
+    // their own scanning UI, which would otherwise swallow the tap before
+    // it ever reaches our canvas. Listening at the window level means we
+    // still catch it regardless of which element visually received it.
+    window.addEventListener("pointerdown", handleTap, { passive: true });
+    window.addEventListener("touchstart", handleTap, { passive: true });
   }
 
   _findNamed(obj) {
