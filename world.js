@@ -244,7 +244,7 @@ class TangibleWorld {
     // a normal room), so we rotate the whole thing -90° on X to stand it
     // up out of the card's plane instead of lying flat inside it.
     const stageUpright = new THREE.Group();
-    stageUpright.rotation.x = -Math.PI / 2;
+    stageUpright.rotation.x = Math.PI / 2;
     anchor.group.add(stageUpright);
     this._buildScene(stageUpright);
 
