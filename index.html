@@ -24,17 +24,17 @@
     align-items:center; justify-content:center; text-align:center; padding:32px;
     background: radial-gradient(120% 120% at 50% 0%, #1c1b19 0%, #0d0d0c 60%);
   }
-  #landing .eyebrow { letter-spacing:.18em; text-transform:uppercase; font-size:11px; color:var(--clay); margin-bottom:14px; }
-  #landing h1 { font-size:26px; margin:0 0 10px; font-weight:600; }
-  #landing p { max-width:340px; color:#c9c6bd; font-size:14px; line-height:1.5; margin:0 0 28px; }
+  #landing .eyebrow { letter-spacing:.14em; text-transform:uppercase; font-size:13px; color:#ffffff; margin:4px 0 36px; }
+  #landing h1 { font-size:44px; line-height:1.05; margin:0 0 20px; font-weight:700; color:#ffffff; }
+  #landing p { max-width:340px; color:#c9c6bd; font-size:14px; line-height:1.6; margin:0 0 40px; }
   .btn {
     appearance:none; border:1px solid var(--line); background:transparent; color:var(--paper);
     padding:14px 22px; border-radius:2px; font-size:14px; letter-spacing:.02em; cursor:pointer;
     min-width:240px; margin-bottom:12px; transition: background .15s, border-color .15s;
   }
-  .btn:hover { border-color: var(--clay); }
-  .btn.primary { background: var(--clay); border-color: var(--clay); color:#161512; font-weight:600; }
-  .btn.primary:hover { background:#d9865f; }
+  .btn:hover { border-color: transparent; border-image: linear-gradient(135deg, #1e6ee1, #6ec3a5) 1; }
+  .btn.primary { background: linear-gradient(135deg, #1e6ee1, #6ec3a5); border-color: transparent; color:#0d0d0c; font-weight:600; }
+  .btn.primary:hover { background: linear-gradient(135deg, #3c82ea, #82d0b4); }
 
   /* ---------- Instruction screen (AR mode) ---------- */
   #instructions {
@@ -47,7 +47,7 @@
     position:relative; opacity:.9;
   }
   #instructions .card-diagram::after {
-    content:""; position:absolute; inset:10px; border:1px dashed var(--clay); border-radius:2px;
+    content:""; position:absolute; inset:10px; border:2px solid; border-image: linear-gradient(135deg, #1e6ee1, #6ec3a5) 1; border-radius:2px;
   }
   #instructions h2 { font-size:17px; margin:0 0 6px; }
   #instructions p { font-size:13px; color:#d8d5cc; max-width:300px; margin:0 0 20px; line-height:1.5; }
@@ -77,7 +77,11 @@
     padding:22px 22px 28px; transition: transform .35s cubic-bezier(.2,.8,.2,1); pointer-events:auto;
   }
   #coinPopup.open { transform:translate(-50%, 0); }
-  #coinPopup .eyebrow { font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--clay); margin-bottom:8px; }
+  #coinPopup .eyebrow {
+    font-size:10px; letter-spacing:.16em; text-transform:uppercase; margin-bottom:8px;
+    background: linear-gradient(135deg, #1e6ee1, #6ec3a5);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
   #coinPopup h3 { margin:0 0 8px; font-size:18px; }
   #coinPopup p { margin:0 0 4px; font-size:13px; line-height:1.5; color:#4a473f; }
   #coinPopup .closeRow { text-align:right; margin-top:14px; }
@@ -111,11 +115,10 @@
 
 <!-- LANDING -->
 <div id="landing">
-  <div class="eyebrow">Tangible Studios</div>
-  <h1>Enter our world</h1>
+  <h1>Tangible Studios</h1>
+  <div class="eyebrow">Enter our world</div>
   <p>This card opens a small studio, built to scale, that lives on top of the physical card in your hand.</p>
   <button class="btn primary" id="startARBtn">Point camera at the card</button>
-  <button class="btn" id="startTestBtn">Test without the card</button>
 </div>
 
 <!-- AR INSTRUCTIONS -->
@@ -173,12 +176,6 @@ const loading = document.getElementById("loading");
 const hud = document.getElementById("hud");
 const backBtn = document.getElementById("backBtn");
 const hint = document.getElementById("hint");
-
-document.getElementById("startTestBtn").addEventListener("click", () => {
-  landing.classList.add("hidden");
-  hud.style.display = "block";
-  world.startTestMode(document.getElementById("app"));
-});
 
 document.getElementById("startARBtn").addEventListener("click", () => {
   landing.classList.add("hidden");
