@@ -232,6 +232,11 @@ class TangibleWorld {
     const mindarThree = new MindARThree({
       container,
       imageTargetSrc: "./targets.mind",
+      // Heavier built-in smoothing at the source, before our own damping
+      // below even sees the pose. Trades a small bit of responsiveness
+      // for a much steadier lock.
+      filterMinCF: 0.00005,
+      filterBeta: 5,
     });
     this._mindar = mindarThree;
     const { renderer, scene, camera } = mindarThree;
@@ -400,8 +405,8 @@ class TangibleWorld {
           this._trackedRoot.quaternion.copy(this._tmpQuat);
           this._hasLockedOnce = true;
         } else {
-          this._trackedRoot.position.lerp(this._tmpPos, 0.15);
-          this._trackedRoot.quaternion.slerp(this._tmpQuat, 0.15);
+          this._trackedRoot.position.lerp(this._tmpPos, 0.06);
+          this._trackedRoot.quaternion.slerp(this._tmpQuat, 0.06);
         }
       }
       // When raw.visible is false (tracking momentarily lost), trackedRoot
