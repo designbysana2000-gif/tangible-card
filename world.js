@@ -3,14 +3,16 @@ import * as THREE from "three";
 /**
  * TangibleWorld
  * -------------
- * Builds the Tech Room + Florana Room out of placeholder primitives so the
- * whole interaction flow (tap targets, transitions, tree-growth animation,
- * back button) can be tested before the real Blender/Unity GLBs and the
- * trained targets.mind file exist.
+ * Builds the Tech Room + Florana Room as ONE back-to-back "capsule" —
+ * matching the real RoomMaster.blend structure, where both rooms share a
+ * spine and face opposite directions. Only one room's opening ever faces
+ * the camera at a time; getting from one to the other is a single 180°
+ * rotation of the whole capsule, not swapping two separate objects'
+ * visibility.
  *
  * SWAP-IN POINT: everywhere you see "// PLACEHOLDER GEOMETRY" below, replace
  * the primitive mesh with a GLTFLoader-loaded model of the same name. Keep
- * the object.name values (contactCard, coin, plant, techRoom, floranaRoom,
+ * the object.name values (contactCard, coin, seed, techRoom, floranaRoom,
  * tree) since the raycaster and animation code look objects up by name.
  */
 class TangibleWorld {
@@ -18,11 +20,13 @@ class TangibleWorld {
     this.mode = null; // "test" | "ar"
     this.onRoomChange = () => {};
     this.currentRoom = "tech";
+    this._transitioning = false;
     this._raycaster = new THREE.Raycaster();
     this._pointer = new THREE.Vector2();
     this._clock = new THREE.Clock();
+    this._seedFall = null; // { start, duration, target, startY, done }
     this._treeAnim = null; // { start, duration, done }
-    this._spin = null; // { start, duration, from, to, onDone }
+    this._spin = null; // { start, duration, onDone }
     this._tmpPos = new THREE.Vector3();
     this._tmpQuat = new THREE.Quaternion();
     this._tmpScale = new THREE.Vector3();
@@ -30,13 +34,22 @@ class TangibleWorld {
 
   /* ============================================================
      Scene construction (shared by both modes)
+     Both rooms are ALWAYS in the scene, permanently attached back-to-back
+     inside one capsule group. Whichever one currently faces the camera is
+     simply whichever way the capsule is rotated — there's no hide/show.
      ============================================================ */
   _buildScene(root) {
+    this.capsule = new THREE.Group();
+    this.capsule.name = "capsule";
+
     this.techRoom = this._buildTechRoom();
     this.floranaRoom = this._buildFloranaRoom();
-    this.floranaRoom.visible = false;
-    root.add(this.techRoom);
-    root.add(this.floranaRoom);
+    // Back-to-back: Florana's opening faces the opposite direction from
+    // the Tech Room's, sharing the same central spine.
+    this.floranaRoom.rotation.y = Math.PI;
+
+    this.capsule.add(this.techRoom, this.floranaRoom);
+    root.add(this.capsule);
   }
 
   _buildTechRoom() {
@@ -85,22 +98,15 @@ class TangibleWorld {
     coin.position.set(0.35, 0.28, -0.35);
     group.add(coin);
 
-    // Plant (pot + foliage)
-    const plant = new THREE.Group();
-    plant.name = "plant";
-    const pot = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.05, 0.08, 16),
-      new THREE.MeshStandardMaterial({ color: 0x9b6b4a, roughness: 0.8 })
+    // Seed — falls and disappears when tapped, then the capsule turns
+    const seed = new THREE.Mesh(
+      new THREE.SphereGeometry(0.045, 16, 16),
+      new THREE.MeshStandardMaterial({ color: 0x5c6b4f, roughness: 0.6 })
     );
-    pot.position.y = 0.29;
-    const leaves = new THREE.Mesh(
-      new THREE.ConeGeometry(0.08, 0.16, 8),
-      new THREE.MeshStandardMaterial({ color: 0x5c6b4f, roughness: 0.7 })
-    );
-    leaves.position.y = 0.42;
-    plant.add(pot, leaves);
-    plant.position.set(0, 0.22, -0.55);
-    group.add(plant);
+    seed.scale.set(1, 1.4, 1);
+    seed.name = "seed";
+    seed.position.set(0, 0.28, -0.55);
+    group.add(seed);
 
     const light = new THREE.PointLight(0xffffff, 1.1, 3);
     light.position.set(0.3, 0.8, 0.3);
@@ -277,10 +283,10 @@ class TangibleWorld {
       this._pointer.y = -((point.clientY - rect.top) / rect.height) * 2 + 1;
       this._raycaster.setFromCamera(this._pointer, camera);
 
-      const hits = this._raycaster.intersectObjects(
-        this.currentRoom === "tech" ? this.techRoom.children : this.floranaRoom.children,
-        true
-      );
+      // Always test the whole capsule — whichever room is actually facing
+      // the camera is the only one its taps can physically reach anyway,
+      // the same way you can't tap something behind you in real life.
+      const hits = this._raycaster.intersectObjects(this.capsule.children, true);
       if (!hits.length) return;
 
       const hit = this._findNamed(hits[0].object);
@@ -288,7 +294,7 @@ class TangibleWorld {
 
       if (hit.name === "contactCard") this._openContact();
       else if (hit.name === "coin") this.openCoinPopup();
-      else if (hit.name === "plant") this._transitionToFlorana();
+      else if (hit.name === "seed") this._transitionToFlorana();
     };
 
     // Bound to window, not domElement: MindAR (and some browser chrome)
@@ -303,7 +309,7 @@ class TangibleWorld {
   _findNamed(obj) {
     let o = obj;
     while (o) {
-      if (["contactCard", "coin", "plant"].includes(o.name)) return o;
+      if (["contactCard", "coin", "seed"].includes(o.name)) return o;
       o = o.parent;
     }
     return null;
@@ -322,40 +328,64 @@ class TangibleWorld {
   }
 
   /* ============================================================
-     Room transition: Tech Room spins out, Florana Room spins in,
-     tree grows, sign appears on completion.
+     Room transition: tap the seed → it falls and disappears → the
+     whole capsule rotates 180° to bring Florana's opening around to
+     face the camera → tree grows → sign appears on completion.
      ============================================================ */
   _transitionToFlorana() {
-    if (this.currentRoom !== "tech") return;
-    this.currentRoom = "florana";
-    this.onRoomChange("florana");
+    if (this._transitioning || this.currentRoom !== "tech") return;
+    this._transitioning = true;
 
+    const seed = this.techRoom.getObjectByName("seed");
+    this._seedFall = {
+      start: this._clock.getElapsedTime(),
+      duration: 0.45,
+      target: seed,
+      startY: seed ? seed.position.y : 0,
+      done: false,
+    };
+  }
+
+  _startCapsuleTurn() {
     this._spin = {
       start: this._clock.getElapsedTime(),
       duration: 0.6,
       onDone: () => {
-        this.techRoom.visible = false;
-        this.floranaRoom.visible = true;
-        this.floranaRoom.rotation.y = 0;
+        this.currentRoom = "florana";
+        this.onRoomChange("florana");
         this._startTreeGrowth();
+        this._transitioning = false;
       },
     };
   }
 
   goBackToTechRoom() {
-    if (this.currentRoom !== "florana") return;
-    this.currentRoom = "tech";
-    this.onRoomChange("tech");
+    if (this.currentRoom !== "florana" || this._transitioning) return;
+    this._transitioning = true;
     document.getElementById("floranaSign").classList.remove("show");
 
-    this.floranaRoom.visible = false;
-    this.techRoom.visible = true;
-    this.techRoom.rotation.y = 0;
+    this._spin = {
+      start: this._clock.getElapsedTime(),
+      duration: 0.6,
+      reverse: true,
+      onDone: () => {
+        this.currentRoom = "tech";
+        this.onRoomChange("tech");
 
-    // Reset tree so the animation plays again next visit
-    const tree = this.floranaRoom.getObjectByName("tree");
-    if (tree) tree.scale.setScalar(0.001);
-    this._treeAnim = null;
+        // Reset the seed and tree so the whole sequence plays again
+        // cleanly next time the seed is tapped.
+        const seed = this.techRoom.getObjectByName("seed");
+        if (seed) {
+          seed.visible = true;
+          seed.scale.set(1, 1.4, 1);
+          seed.position.y = 0.28;
+        }
+        const tree = this.floranaRoom.getObjectByName("tree");
+        if (tree) tree.scale.setScalar(0.001);
+        this._treeAnim = null;
+        this._transitioning = false;
+      },
+    };
   }
 
   _startTreeGrowth() {
@@ -379,11 +409,29 @@ class TangibleWorld {
   _tick() {
     const t = this._clock.getElapsedTime();
 
+    if (this._seedFall && !this._seedFall.done) {
+      const k = Math.min(1, (t - this._seedFall.start) / this._seedFall.duration);
+      const seed = this._seedFall.target;
+      if (seed) {
+        seed.position.y = this._seedFall.startY - k * 0.18;
+        const s = Math.max(0, 1 - k) * 1;
+        seed.scale.set(s, s * 1.4, s);
+      }
+      if (k >= 1) {
+        this._seedFall.done = true;
+        if (seed) seed.visible = false;
+        this._startCapsuleTurn();
+      }
+    }
+
     if (this._spin) {
       const k = Math.min(1, (t - this._spin.start) / this._spin.duration);
       const eased = 1 - Math.pow(1 - k, 3);
-      this.techRoom.rotation.y = eased * Math.PI * 2;
+      this.capsule.rotation.y = this._spin.reverse
+        ? Math.PI * (1 - eased)
+        : Math.PI * eased;
       if (k >= 1) {
+        this.capsule.rotation.y = this._spin.reverse ? 0 : Math.PI;
         const done = this._spin.onDone;
         this._spin = null;
         done();
