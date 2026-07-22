@@ -416,20 +416,23 @@ class TangibleWorld {
 
     const seeds = this._getAllNamed(this.techRoom, "seed");
 
-    // MindAR's camera never actually moves — only the tracked card's
-    // virtual position updates to compensate — so "screen down" is
-    // always simply world -Y, no matter how the room itself is tilted.
-    // We work entirely in world space here (capturing each seed's real
-    // starting world position, then lowering that world Y each frame)
-    // rather than moving in the seed's own local coordinates, since that
-    // node sits inside nested import wrappers with an unpredictable
-    // scale baked in — a small local move could end up invisible or
-    // enormous depending on that hidden scale factor.
+    // Derive "down" directly from the actual camera's own orientation,
+    // rather than assuming world -Y matches screen-down — that assumption
+    // didn't hold up in practice, so we go straight to the source: the
+    // camera itself always knows which way is down on its own screen.
+    const camDown = new THREE.Vector3(0, -1, 0);
+    if (this.camera) {
+      const camQuat = new THREE.Quaternion();
+      this.camera.getWorldQuaternion(camQuat);
+      camDown.applyQuaternion(camQuat).normalize();
+    }
+
     this._seedFall = {
       start: this._clock.getElapsedTime(),
       duration: 0.45,
       targets: seeds,
       startWorldPositions: seeds.map((s) => s.getWorldPosition(new THREE.Vector3())),
+      fallDirection: camDown,
       done: false,
     };
   }
@@ -509,8 +512,8 @@ class TangibleWorld {
       const k = Math.min(1, (t - this._seedFall.start) / this._seedFall.duration);
       const s = Math.max(0, 1 - k);
       this._seedFall.targets.forEach((seed, i) => {
-        const targetWorld = this._seedFall.startWorldPositions[i].clone();
-        targetWorld.y -= k * 0.18;
+        const targetWorld = this._seedFall.startWorldPositions[i].clone()
+          .addScaledVector(this._seedFall.fallDirection, k * 0.18);
         seed.parent.worldToLocal(targetWorld);
         seed.position.copy(targetWorld);
         seed.scale.set(s, s * 1.4, s);
