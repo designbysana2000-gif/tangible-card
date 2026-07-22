@@ -61,7 +61,7 @@ class TangibleWorld {
       "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
     );
     const loader = new GLTFLoader();
-    const gltf = await loader.loadAsync("./tech_room.glb?v=3");
+    const gltf = await loader.loadAsync("./tech_room.glb?v=4");
     const group = gltf.scene;
     group.name = "techRoom";
     // The model's own "forward" direction from export doesn't match what
@@ -91,6 +91,19 @@ class TangibleWorld {
       position: node.position.clone(),
       scale: node.scale.clone(),
     }));
+
+    // Your model now has its own baked seed-falling animation — using
+    // that directly instead of us guessing a fall direction in code,
+    // since that's already correct exactly as you built it in Blender.
+    if (gltf.animations && gltf.animations.length > 0) {
+      this._techMixer = new THREE.AnimationMixer(group);
+      this._seedClipAction = this._techMixer.clipAction(gltf.animations[0]);
+      this._seedClipAction.setLoop(THREE.LoopOnce);
+      this._seedClipAction.clampWhenFinished = true;
+      this._techMixer.addEventListener("finished", (e) => {
+        if (e.action === this._seedClipAction) this._startCapsuleTurn();
+      });
+    }
 
     const light = new THREE.PointLight(0xffffff, 1.1, 3);
     light.position.set(0.3, 0.8, 0.3);
@@ -288,10 +301,14 @@ class TangibleWorld {
       this._pointer.y = -((point.clientY - rect.top) / rect.height) * 2 + 1;
       this._raycaster.setFromCamera(this._pointer, camera);
 
-      // Always test the whole capsule — whichever room is actually facing
-      // the camera is the only one its taps can physically reach anyway,
-      // the same way you can't tap something behind you in real life.
-      const hits = this._raycaster.intersectObjects(this.capsule.children, true);
+      // Only test the currently active room's own children. Three.js
+      // raycasting does NOT automatically respect the .visible flag —
+      // that only affects rendering — so testing the whole capsule meant
+      // taps in Florana could still hit the tech room's (hidden but
+      // still physically present) coin geometry sitting underneath it,
+      // occasionally hijacking a tap meant for the tree.
+      const activeRoom = this.currentRoom === "tech" ? this.techRoom : this.floranaRoom;
+      const hits = this._raycaster.intersectObjects(activeRoom.children, true);
       if (!hits.length) {
         console.log("Tap: hit nothing.");
         return;
@@ -414,27 +431,22 @@ class TangibleWorld {
     if (this._transitioning || this.currentRoom !== "tech") return;
     this._transitioning = true;
 
-    const seeds = this._getAllNamed(this.techRoom, "seed");
-
-    // Derive "down" directly from the actual camera's own orientation,
-    // rather than assuming world -Y matches screen-down — that assumption
-    // didn't hold up in practice, so we go straight to the source: the
-    // camera itself always knows which way is down on its own screen.
-    const camDown = new THREE.Vector3(0, -1, 0);
-    if (this.camera) {
-      const camQuat = new THREE.Quaternion();
-      this.camera.getWorldQuaternion(camQuat);
-      camDown.applyQuaternion(camQuat).normalize();
+    if (this._seedClipAction) {
+      // Use your model's own baked falling animation — it's already
+      // correct exactly as built in Blender, no direction guessing.
+      this._seedClipAction.reset().play();
+      // _startCapsuleTurn() fires automatically via the mixer's
+      // "finished" event once this animation completes (see _buildTechRoom).
+    } else {
+      // Fallback if no animation is present: shrink the seed in place.
+      const seeds = this._getAllNamed(this.techRoom, "seed");
+      this._seedFall = {
+        start: this._clock.getElapsedTime(),
+        duration: 0.45,
+        targets: seeds,
+        done: false,
+      };
     }
-
-    this._seedFall = {
-      start: this._clock.getElapsedTime(),
-      duration: 0.45,
-      targets: seeds,
-      startWorldPositions: seeds.map((s) => s.getWorldPosition(new THREE.Vector3())),
-      fallDirection: camDown,
-      done: false,
-    };
   }
 
   _startCapsuleTurn() {
@@ -471,9 +483,23 @@ class TangibleWorld {
         // Florana has now fully turned away — hide it outright.
         this.floranaRoom.visible = false;
 
-        // Reset the seed and tree so the whole sequence plays again
-        // cleanly next time the seed is tapped — restoring each seed
-        // node's real captured starting transform, not guessed numbers.
+        // The animation targets a mesh nested several levels deeper than
+        // the node we can easily grab by name, so manually resetting
+        // position/scale on the outer node never touched the real
+        // animated geometry. Instead, we use the animation system itself
+        // to snap back to frame zero — reset and play, apply that first
+        // frame's pose immediately, then freeze it there.
+        if (this._seedClipAction) {
+          this._seedClipAction.reset();
+          this._seedClipAction.paused = false;
+          this._seedClipAction.play();
+          this._techMixer.update(0);
+          this._seedClipAction.paused = true;
+        }
+
+        // Also restore anything we CAN reliably reset directly (the
+        // outer node's visibility/position/scale, for the non-animated
+        // fallback path).
         (this._seedInitial || []).forEach(({ node, position, scale }) => {
           node.visible = true;
           node.position.copy(position);
@@ -508,14 +534,18 @@ class TangibleWorld {
   _tick() {
     const t = this._clock.getElapsedTime();
 
+    // Manually derive delta from consecutive elapsed-time readings rather
+    // than also calling clock.getDelta(), since getElapsedTime() already
+    // consumes the clock's internal delta each frame — calling both would
+    // silently break one of them.
+    const dt = t - (this._lastTick || t);
+    this._lastTick = t;
+    if (this._techMixer) this._techMixer.update(dt);
+
     if (this._seedFall && !this._seedFall.done) {
       const k = Math.min(1, (t - this._seedFall.start) / this._seedFall.duration);
       const s = Math.max(0, 1 - k);
-      this._seedFall.targets.forEach((seed, i) => {
-        const targetWorld = this._seedFall.startWorldPositions[i].clone()
-          .addScaledVector(this._seedFall.fallDirection, k * 0.18);
-        seed.parent.worldToLocal(targetWorld);
-        seed.position.copy(targetWorld);
+      this._seedFall.targets.forEach((seed) => {
         seed.scale.set(s, s * 1.4, s);
       });
       if (k >= 1) {
