@@ -316,6 +316,14 @@ class TangibleWorld {
     this._arAnchor.group.getWorldScale(lockedRoot.scale);
     lockedRoot.add(this._stageUpright);
 
+    // MindAR keeps showing its own "searching for target" scanning UI
+    // whenever it can't currently see the card — but once locked, we no
+    // longer care about tracking at all, so that indicator is just noise.
+    // !important ensures it stays hidden even if MindAR tries to
+    // re-show it on its own.
+    const scanningUI = document.querySelector(".mindar-ui-scanning");
+    if (scanningUI) scanningUI.style.setProperty("display", "none", "important");
+
     document.getElementById("lockPrompt").classList.remove("show");
   }
 
