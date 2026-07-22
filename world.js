@@ -243,12 +243,6 @@ class TangibleWorld {
     this.camera = camera;
 
     const anchor = mindarThree.addAnchor(0);
-    // Some MindAR versions only actively update an anchor's pose if it
-    // has something attached to it. Since our real content now lives in
-    // a separate smoothed group (below) rather than directly on the
-    // anchor, we give it one token invisible child so it still looks
-    // "in use" and keeps getting tracked normally.
-    anchor.group.add(new THREE.Object3D());
 
     // The tracked image lies flat on the table with its anchor's Z axis
     // pointing straight up off the card. Our room is modeled Y-up (like
@@ -264,32 +258,13 @@ class TangibleWorld {
     // sitting right at table height, which read as "too low."
     stageUpright.scale.setScalar(0.5);
     stageUpright.position.z = 0.12;
-
-    // Smooth-follow setup: content lives in its own top-level group that
-    // eases toward the raw anchor's pose each frame (see _tick), instead
-    // of being a direct child of the anchor that jitters every frame.
-    const trackedRoot = new THREE.Group();
-    scene.add(trackedRoot);
-    trackedRoot.add(stageUpright);
-    this._trackAnchorGroup = anchor.group;
-    this._trackedRoot = trackedRoot;
-    this._hasLockedOnce = false;
-
+    anchor.group.add(stageUpright);
     await this._buildScene(stageUpright);
 
     this._bindPointer(renderer.domElement, camera);
 
     await mindarThree.start();
-    renderer.setAnimationLoop(() => {
-      // Defensive: if anything in here throws, we log it instead of
-      // silently killing the whole render loop (which would look exactly
-      // like "the camera stopped reading the target").
-      try {
-        this._tick();
-      } catch (err) {
-        console.error("Render loop error:", err);
-      }
-    });
+    renderer.setAnimationLoop(() => this._tick());
   }
 
   /* ============================================================
@@ -477,24 +452,6 @@ class TangibleWorld {
      ============================================================ */
   _tick() {
     const t = this._clock.getElapsedTime();
-
-    // Smooth-follow the raw AR anchor pose so the room settles into
-    // place and holds still. Defensively guarded: any missing piece
-    // here just skips smoothing for this frame rather than throwing.
-    if (this.mode === "ar" && this._trackAnchorGroup && this._trackedRoot) {
-      const raw = this._trackAnchorGroup;
-      if (raw && raw.visible && raw.matrix) {
-        raw.matrix.decompose(this._tmpPos, this._tmpQuat, this._tmpScale);
-        if (!this._hasLockedOnce) {
-          this._trackedRoot.position.copy(this._tmpPos);
-          this._trackedRoot.quaternion.copy(this._tmpQuat);
-          this._hasLockedOnce = true;
-        } else {
-          this._trackedRoot.position.lerp(this._tmpPos, 0.15);
-          this._trackedRoot.quaternion.slerp(this._tmpQuat, 0.15);
-        }
-      }
-    }
 
     if (this._seedFall && !this._seedFall.done) {
       const k = Math.min(1, (t - this._seedFall.start) / this._seedFall.duration);
