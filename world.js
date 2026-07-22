@@ -77,6 +77,12 @@ class TangibleWorld {
     this._renameFirstMatch(group, ["Card_Export", "Card_GEo1"], "contactCard");
     this._renameFirstMatch(group, ["CoinCapsule"], "coin");
     this._renameFirstMatch(group, ["seed_fbx"], "seed");
+    // The coin already has a glass "capsule" container in the model that
+    // makes it easy to tap. The seed doesn't have an equivalent container
+    // yet, so we add an invisible, generously-sized sphere around it
+    // purely as a bigger tap target — it's transparent, so it changes
+    // nothing about how the seed actually looks.
+    this._addGenerousHitTarget(group, "seed", 3);
 
     const light = new THREE.PointLight(0xffffff, 1.1, 3);
     light.position.set(0.3, 0.8, 0.3);
@@ -297,6 +303,32 @@ class TangibleWorld {
     // still catch it regardless of which element visually received it.
     window.addEventListener("pointerdown", handleTap, { passive: true });
     window.addEventListener("touchstart", handleTap, { passive: true });
+  }
+
+  // Wraps every node with the given name in an invisible, generously
+  // sized sphere used only for raycasting — makes small objects much
+  // easier to tap accurately without changing how they actually look.
+  _addGenerousHitTarget(root, name, paddingScale) {
+    const nodes = this._getAllNamed(root, name);
+    nodes.forEach((node) => {
+      const box = new THREE.Box3().setFromObject(node);
+      if (box.isEmpty()) return;
+      const size = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(center);
+      const radius = (Math.max(size.x, size.y, size.z) / 2) * paddingScale;
+
+      const hitSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 12, 12),
+        new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+      );
+      hitSphere.name = name;
+      // Position in the same local space as the node's parent.
+      node.parent.worldToLocal(center);
+      hitSphere.position.copy(center);
+      node.parent.add(hitSphere);
+    });
   }
 
   // Returns every descendant with the given name, since a model can end
