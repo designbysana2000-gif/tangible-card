@@ -61,7 +61,7 @@ class TangibleWorld {
       "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
     );
     const loader = new GLTFLoader();
-    const gltf = await loader.loadAsync("./tech_room.glb?v=2");
+    const gltf = await loader.loadAsync("./tech_room.glb?v=3");
     const group = gltf.scene;
     group.name = "techRoom";
     // The model's own "forward" direction from export doesn't match what
@@ -82,7 +82,15 @@ class TangibleWorld {
     // yet, so we add an invisible, generously-sized sphere around it
     // purely as a bigger tap target — it's transparent, so it changes
     // nothing about how the seed actually looks.
-    this._addGenerousHitTarget(group, "seed", 8);
+    this._addGenerousHitTarget(group, "seed", 2);
+    // Remember each seed node's real starting position/scale from the
+    // actual model, so we can restore it precisely later — using guessed
+    // numbers here caused it to snap to the wrong spot after a return trip.
+    this._seedInitial = this._getAllNamed(group, "seed").map((node) => ({
+      node,
+      position: node.position.clone(),
+      scale: node.scale.clone(),
+    }));
 
     const light = new THREE.PointLight(0xffffff, 1.1, 3);
     light.position.set(0.3, 0.8, 0.3);
@@ -289,8 +297,24 @@ class TangibleWorld {
         return;
       }
 
-      const hit = this._findNamed(hits[0].object);
-      console.log(`Tap: hit "${hits[0].object.name || "(unnamed mesh)"}" — resolved to "${hit ? hit.name : "no match"}".`);
+      // The seed's hit zone is oversized and can overlap nearby objects
+      // (see world.js history), so a precisely-named hit like "coin" or
+      // "contactCard" anywhere along this ray always wins over "seed" or
+      // "tree", even if the seed zone happens to be physically closer.
+      let hit = null;
+      let fallback = null;
+      for (const h of hits) {
+        const resolved = this._findNamed(h.object);
+        if (!resolved) continue;
+        if (resolved.name === "coin" || resolved.name === "contactCard") {
+          hit = resolved;
+          break;
+        }
+        if (!fallback) fallback = resolved;
+      }
+      if (!hit) hit = fallback;
+
+      console.log(`Tap: hit "${hits[0].object.name || "(unnamed mesh)"}" — resolved to "${hit ? hit.name : "no match"}". World point: (${hits[0].point.x.toFixed(3)}, ${hits[0].point.y.toFixed(3)}, ${hits[0].point.z.toFixed(3)})`);
       if (!hit) return;
 
       if (hit.name === "contactCard") this._openContact();
@@ -391,11 +415,21 @@ class TangibleWorld {
     this._transitioning = true;
 
     const seeds = this._getAllNamed(this.techRoom, "seed");
+
+    // MindAR's camera never actually moves — only the tracked card's
+    // virtual position updates to compensate — so "screen down" is
+    // always simply world -Y, no matter how the room itself is tilted.
+    // We work entirely in world space here (capturing each seed's real
+    // starting world position, then lowering that world Y each frame)
+    // rather than moving in the seed's own local coordinates, since that
+    // node sits inside nested import wrappers with an unpredictable
+    // scale baked in — a small local move could end up invisible or
+    // enormous depending on that hidden scale factor.
     this._seedFall = {
       start: this._clock.getElapsedTime(),
       duration: 0.45,
       targets: seeds,
-      startYs: seeds.map((s) => s.position.y),
+      startWorldPositions: seeds.map((s) => s.getWorldPosition(new THREE.Vector3())),
       done: false,
     };
   }
@@ -435,12 +469,12 @@ class TangibleWorld {
         this.floranaRoom.visible = false;
 
         // Reset the seed and tree so the whole sequence plays again
-        // cleanly next time the seed is tapped.
-        const seeds = this._getAllNamed(this.techRoom, "seed");
-        seeds.forEach((seed) => {
-          seed.visible = true;
-          seed.scale.set(1, 1.4, 1);
-          seed.position.y = 0.28;
+        // cleanly next time the seed is tapped — restoring each seed
+        // node's real captured starting transform, not guessed numbers.
+        (this._seedInitial || []).forEach(({ node, position, scale }) => {
+          node.visible = true;
+          node.position.copy(position);
+          node.scale.copy(scale);
         });
         const tree = this.floranaRoom.getObjectByName("tree");
         if (tree) tree.scale.setScalar(0.001);
@@ -475,7 +509,10 @@ class TangibleWorld {
       const k = Math.min(1, (t - this._seedFall.start) / this._seedFall.duration);
       const s = Math.max(0, 1 - k);
       this._seedFall.targets.forEach((seed, i) => {
-        seed.position.y = this._seedFall.startYs[i] - k * 0.18;
+        const targetWorld = this._seedFall.startWorldPositions[i].clone();
+        targetWorld.y -= k * 0.18;
+        seed.parent.worldToLocal(targetWorld);
+        seed.position.copy(targetWorld);
         seed.scale.set(s, s * 1.4, s);
       });
       if (k >= 1) {
