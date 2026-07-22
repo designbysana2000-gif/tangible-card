@@ -284,9 +284,13 @@ class TangibleWorld {
       // the camera is the only one its taps can physically reach anyway,
       // the same way you can't tap something behind you in real life.
       const hits = this._raycaster.intersectObjects(this.capsule.children, true);
-      if (!hits.length) return;
+      if (!hits.length) {
+        console.log("Tap: hit nothing.");
+        return;
+      }
 
       const hit = this._findNamed(hits[0].object);
+      console.log(`Tap: hit "${hits[0].object.name || "(unnamed mesh)"}" — resolved to "${hit ? hit.name : "no match"}".`);
       if (!hit) return;
 
       if (hit.name === "contactCard") this._openContact();
@@ -309,26 +313,40 @@ class TangibleWorld {
   // Wraps every node with the given name in an invisible, generously
   // sized sphere used only for raycasting — makes small objects much
   // easier to tap accurately without changing how they actually look.
+  // The sphere is a CHILD of the node (so it inherits its transform
+  // correctly), but offset within the node's own local space to sit at
+  // the geometry's actual visual center — FBX-imported assets often have
+  // a pivot point far from where the mesh actually appears, so centering
+  // on local (0,0,0) alone isn't reliable.
   _addGenerousHitTarget(root, name, paddingScale) {
     const nodes = this._getAllNamed(root, name);
+    console.log(`Hit-target setup for "${name}": found ${nodes.length} matching node(s).`);
     nodes.forEach((node) => {
       const box = new THREE.Box3().setFromObject(node);
-      if (box.isEmpty()) return;
-      const size = new THREE.Vector3();
-      const center = new THREE.Vector3();
-      box.getSize(size);
-      box.getCenter(center);
-      const radius = (Math.max(size.x, size.y, size.z) / 2) * paddingScale;
+      let radius = 0.06; // sensible fallback if the box comes back empty
+      let localCenter = new THREE.Vector3(0, 0, 0);
+      if (!box.isEmpty()) {
+        const size = new THREE.Vector3();
+        const worldCenter = new THREE.Vector3();
+        box.getSize(size);
+        box.getCenter(worldCenter);
+        radius = (Math.max(size.x, size.y, size.z) / 2) * paddingScale;
+        // Convert the geometry's real center into this node's own local
+        // space, since the node's pivot may not be at (0,0,0) visually.
+        localCenter = node.worldToLocal(worldCenter.clone());
+        console.log(`  "${node.name}" visual center is offset from its pivot by (${localCenter.x.toFixed(3)}, ${localCenter.y.toFixed(3)}, ${localCenter.z.toFixed(3)}) in local space.`);
+      } else {
+        console.log(`  "${node.name}" had an empty bounding box — using fallback radius, centered at pivot.`);
+      }
 
       const hitSphere = new THREE.Mesh(
-        new THREE.SphereGeometry(radius, 12, 12),
+        new THREE.SphereGeometry(Math.max(radius, 0.04), 12, 12),
         new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
       );
       hitSphere.name = name;
-      // Position in the same local space as the node's parent.
-      node.parent.worldToLocal(center);
-      hitSphere.position.copy(center);
-      node.parent.add(hitSphere);
+      hitSphere.position.copy(localCenter);
+      node.add(hitSphere);
+      console.log(`  Added hit sphere (radius ${radius.toFixed(3)}) as a child of that node.`);
     });
   }
 
