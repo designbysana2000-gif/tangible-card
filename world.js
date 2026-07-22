@@ -61,7 +61,7 @@ class TangibleWorld {
       "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
     );
     const loader = new GLTFLoader();
-    const gltf = await loader.loadAsync("./tech_room.glb");
+    const gltf = await loader.loadAsync("./tech_room.glb?v=2");
     const group = gltf.scene;
     group.name = "techRoom";
     // The model's own "forward" direction from export doesn't match what
