@@ -258,22 +258,7 @@ class TangibleWorld {
     // sitting right at table height, which read as "too low."
     stageUpright.scale.setScalar(0.5);
     stageUpright.position.z = 0.12;
-
-    // Content is NOT parented directly under the raw anchor.group, because
-    // that transform updates every frame straight from MindAR's per-frame
-    // pose estimate, which has natural small jitter. Instead we track the
-    // anchor's raw pose ourselves each frame and smoothly ease our own
-    // "trackedRoot" toward it, so once it settles into place it holds
-    // still rather than visibly shaking. If tracking briefly drops out
-    // (glare, motion blur, card partly out of frame), trackedRoot simply
-    // stays exactly where it last was instead of snapping or disappearing.
-    const trackedRoot = new THREE.Group();
-    scene.add(trackedRoot);
-    trackedRoot.add(stageUpright);
-    this._trackAnchorGroup = anchor.group;
-    this._trackedRoot = trackedRoot;
-    this._hasLockedOnce = false;
-
+    anchor.group.add(stageUpright);
     await this._buildScene(stageUpright);
 
     this._bindPointer(renderer.domElement, camera);
@@ -467,27 +452,6 @@ class TangibleWorld {
      ============================================================ */
   _tick() {
     const t = this._clock.getElapsedTime();
-
-    // Smooth-follow the raw AR anchor pose so the room settles into
-    // place and holds still, instead of visibly shaking every frame.
-    if (this.mode === "ar" && this._trackAnchorGroup) {
-      const raw = this._trackAnchorGroup;
-      if (raw.visible) {
-        raw.matrix.decompose(this._tmpPos, this._tmpQuat, this._tmpScale);
-        if (!this._hasLockedOnce) {
-          // First time the card is found: snap directly into place,
-          // no slow fly-in from the origin.
-          this._trackedRoot.position.copy(this._tmpPos);
-          this._trackedRoot.quaternion.copy(this._tmpQuat);
-          this._hasLockedOnce = true;
-        } else {
-          this._trackedRoot.position.lerp(this._tmpPos, 0.15);
-          this._trackedRoot.quaternion.slerp(this._tmpQuat, 0.15);
-        }
-      }
-      // When raw.visible is false (tracking momentarily lost), trackedRoot
-      // simply keeps its last position — nothing to do here on purpose.
-    }
 
     if (this._seedFall && !this._seedFall.done) {
       const k = Math.min(1, (t - this._seedFall.start) / this._seedFall.duration);
