@@ -313,6 +313,7 @@ class TangibleWorld {
     // there's no visual jump at the moment of locking.
     this._arAnchor.group.getWorldPosition(lockedRoot.position);
     this._arAnchor.group.getWorldQuaternion(lockedRoot.quaternion);
+    this._arAnchor.group.getWorldScale(lockedRoot.scale);
     lockedRoot.add(this._stageUpright);
 
     document.getElementById("lockPrompt").classList.remove("show");
