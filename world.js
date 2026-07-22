@@ -243,6 +243,12 @@ class TangibleWorld {
     this.camera = camera;
 
     const anchor = mindarThree.addAnchor(0);
+    // Some MindAR versions only actively update an anchor's pose if it
+    // has something attached to it. Since our real content now lives in
+    // a separate smoothed group (below) rather than directly on the
+    // anchor, we give it one token invisible child so it still looks
+    // "in use" and keeps getting tracked normally.
+    anchor.group.add(new THREE.Object3D());
 
     // The tracked image lies flat on the table with its anchor's Z axis
     // pointing straight up off the card. Our room is modeled Y-up (like
