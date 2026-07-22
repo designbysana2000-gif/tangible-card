@@ -82,7 +82,7 @@ class TangibleWorld {
     // yet, so we add an invisible, generously-sized sphere around it
     // purely as a bigger tap target — it's transparent, so it changes
     // nothing about how the seed actually looks.
-    this._addGenerousHitTarget(group, "seed", 3);
+    this._addGenerousHitTarget(group, "seed", 8);
 
     const light = new THREE.PointLight(0xffffff, 1.1, 3);
     light.position.set(0.3, 0.8, 0.3);
@@ -340,7 +340,7 @@ class TangibleWorld {
       }
 
       const hitSphere = new THREE.Mesh(
-        new THREE.SphereGeometry(Math.max(radius, 0.04), 12, 12),
+        new THREE.SphereGeometry(Math.max(radius, 0.15), 12, 12),
         new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
       );
       hitSphere.name = name;
