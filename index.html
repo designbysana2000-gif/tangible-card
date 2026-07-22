@@ -70,18 +70,6 @@
     border-radius:20px; pointer-events:none; backdrop-filter: blur(6px); transition:opacity .3s;
   }
 
-  /* ---------- Lock placement prompt ---------- */
-  #lockPrompt {
-    position:fixed; inset:0; z-index:25; display:flex; align-items:flex-end; justify-content:center;
-    padding-bottom:90px; pointer-events:none; opacity:0; transition:opacity .3s;
-  }
-  #lockPrompt.show { opacity:1; pointer-events:auto; }
-  #lockBtn {
-    background: linear-gradient(135deg, #1e6ee1, #6ec3a5); border:none; color:#0d0d0c;
-    font-weight:600; font-size:14px; padding:14px 26px; border-radius:24px; cursor:pointer;
-    box-shadow: 0 4px 18px rgba(0,0,0,.35);
-  }
-
   /* ---------- Coin popup ---------- */
   #coinPopup {
     position:fixed; left:50%; bottom:0; transform:translate(-50%, 100%); z-index:30;
@@ -143,11 +131,6 @@
 
 <div id="loading">preparing the studio…</div>
 
-<!-- LOCK PLACEMENT PROMPT -->
-<div id="lockPrompt">
-  <button id="lockBtn">Tap to place</button>
-</div>
-
 <!-- SHARED HUD -->
 <div id="hud">
   <div class="top-bar">
@@ -184,7 +167,7 @@
 
 <script type="module">
 import * as THREE from "three";
-import { world } from "./world.js?v=35";
+import { world } from "./world.js?v=36";
 
 /* ---------------- Mode wiring ---------------- */
 const landing = document.getElementById("landing");
@@ -224,10 +207,6 @@ world.onRoomChange = (room) => {
 
 document.getElementById("closeCoinBtn").addEventListener("click", () => {
   world.closeCoinPopup();
-});
-
-document.getElementById("lockBtn").addEventListener("click", () => {
-  world.lockPlacement();
 });
 </script>
 </body>

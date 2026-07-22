@@ -264,7 +264,6 @@ class TangibleWorld {
     this.camera = camera;
 
     const anchor = mindarThree.addAnchor(0);
-    this._arAnchor = anchor;
 
     // The tracked image lies flat on the table with its anchor's Z axis
     // pointing straight up off the card. Our room is modeled Y-up (like
@@ -281,50 +280,12 @@ class TangibleWorld {
     stageUpright.scale.setScalar(0.5);
     stageUpright.position.z = 0.2;
     anchor.group.add(stageUpright);
-    this._stageUpright = stageUpright;
     await this._buildScene(stageUpright);
-
-    // Show a "Tap to place" prompt the first time the card is actually
-    // found, rather than immediately — no point offering to lock
-    // something that isn't visible yet.
-    anchor.onTargetFound = () => {
-      const prompt = document.getElementById("lockPrompt");
-      if (prompt && !this._locked) prompt.classList.add("show");
-    };
 
     this._bindPointer(renderer.domElement, camera);
 
     await mindarThree.start();
     renderer.setAnimationLoop(() => this._tick());
-  }
-
-  // Detaches the room from live card tracking, freezing it exactly where
-  // it currently appears on screen. From this point on it stays put even
-  // if the card moves or is no longer in view — trading "follows the
-  // card" for "holds still," which is the point of locking it in place.
-  lockPlacement() {
-    if (this._locked || !this._arAnchor || !this._stageUpright) return;
-    this._locked = true;
-
-    const lockedRoot = new THREE.Group();
-    this.scene.add(lockedRoot);
-    // Re-parenting preserves the stageUpright's local transform, and
-    // lockedRoot inherits the anchor's current world transform below, so
-    // there's no visual jump at the moment of locking.
-    this._arAnchor.group.getWorldPosition(lockedRoot.position);
-    this._arAnchor.group.getWorldQuaternion(lockedRoot.quaternion);
-    this._arAnchor.group.getWorldScale(lockedRoot.scale);
-    lockedRoot.add(this._stageUpright);
-
-    // MindAR keeps showing its own "searching for target" scanning UI
-    // whenever it can't currently see the card — but once locked, we no
-    // longer care about tracking at all, so that indicator is just noise.
-    // !important ensures it stays hidden even if MindAR tries to
-    // re-show it on its own.
-    const scanningUI = document.querySelector(".mindar-ui-scanning");
-    if (scanningUI) scanningUI.style.setProperty("display", "none", "important");
-
-    document.getElementById("lockPrompt").classList.remove("show");
   }
 
   /* ============================================================
