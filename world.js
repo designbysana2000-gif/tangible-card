@@ -246,18 +246,34 @@ class TangibleWorld {
 
     // The tracked image lies flat on the table with its anchor's Z axis
     // pointing straight up off the card. Our room is modeled Y-up (like
-    // a normal room), so we rotate the whole thing 90° on X to stand it
-    // up out of the card's plane instead of lying flat inside it.
+    // a normal room). A full 90° stand-up means looking straight down
+    // from overhead (the natural way to view a flat card) shows mostly
+    // the roof rather than the interior — so we lean it back a bit less
+    // than a full 90°, more like leaning a picture frame back for a
+    // seated viewer, so the opening reads clearly from a typical
+    // overhead phone angle instead of needing to hold the card upright.
     const stageUpright = new THREE.Group();
-    stageUpright.rotation.x = Math.PI / 2;
-    // Scaled down substantially: the room was originally sized assuming a
-    // business-card-width tracked image. Larger tracked images (like an
-    // envelope) make MindAR render everything bigger in real-world terms,
-    // which can put the camera inside the geometry at normal viewing
-    // distance. This keeps the room comfortably small no matter what
-    // physical object is being tracked.
-    stageUpright.scale.setScalar(0.35);
-    anchor.group.add(stageUpright);
+    stageUpright.rotation.x = Math.PI * 0.4; // ~72°, was a full 90°
+    // Bigger than before, and raised up off the card's surface — was
+    // sitting right at table height, which read as "too low."
+    stageUpright.scale.setScalar(0.5);
+    stageUpright.position.z = 0.12;
+
+    // Content is NOT parented directly under the raw anchor.group, because
+    // that transform updates every frame straight from MindAR's per-frame
+    // pose estimate, which has natural small jitter. Instead we track the
+    // anchor's raw pose ourselves each frame and smoothly ease our own
+    // "trackedRoot" toward it, so once it settles into place it holds
+    // still rather than visibly shaking. If tracking briefly drops out
+    // (glare, motion blur, card partly out of frame), trackedRoot simply
+    // stays exactly where it last was instead of snapping or disappearing.
+    const trackedRoot = new THREE.Group();
+    scene.add(trackedRoot);
+    trackedRoot.add(stageUpright);
+    this._trackAnchorGroup = anchor.group;
+    this._trackedRoot = trackedRoot;
+    this._hasLockedOnce = false;
+
     await this._buildScene(stageUpright);
 
     this._bindPointer(renderer.domElement, camera);
@@ -451,6 +467,27 @@ class TangibleWorld {
      ============================================================ */
   _tick() {
     const t = this._clock.getElapsedTime();
+
+    // Smooth-follow the raw AR anchor pose so the room settles into
+    // place and holds still, instead of visibly shaking every frame.
+    if (this.mode === "ar" && this._trackAnchorGroup) {
+      const raw = this._trackAnchorGroup;
+      if (raw.visible) {
+        raw.matrix.decompose(this._tmpPos, this._tmpQuat, this._tmpScale);
+        if (!this._hasLockedOnce) {
+          // First time the card is found: snap directly into place,
+          // no slow fly-in from the origin.
+          this._trackedRoot.position.copy(this._tmpPos);
+          this._trackedRoot.quaternion.copy(this._tmpQuat);
+          this._hasLockedOnce = true;
+        } else {
+          this._trackedRoot.position.lerp(this._tmpPos, 0.15);
+          this._trackedRoot.quaternion.slerp(this._tmpQuat, 0.15);
+        }
+      }
+      // When raw.visible is false (tracking momentarily lost), trackedRoot
+      // simply keeps its last position — nothing to do here on purpose.
+    }
 
     if (this._seedFall && !this._seedFall.done) {
       const k = Math.min(1, (t - this._seedFall.start) / this._seedFall.duration);
