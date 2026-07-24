@@ -166,13 +166,13 @@ class TangibleWorld {
     // Found via live console testing (see conversation) rather than
     // guessed 90° increments — this model's export apparently wasn't at
     // a clean axis-aligned angle, so it needed a precise value instead.
-    group.rotation.y = -1.62;
+    group.rotation.y = -1.63;
     group.position.x = 0.1;
     // This is a separate Blender export from the tech room, so it likely
     // has its own native scale — guessing small here since a huge flat
     // panel filling the screen was exactly what the tech room looked
     // like before its scale (not rotation) turned out to be the real fix.
-    group.scale.setScalar(0.4);
+    group.scale.setScalar(0.7);
 
     this._renameFirstMatch(group, ["tree003_4", "tree.003_4"], "tree");
 
