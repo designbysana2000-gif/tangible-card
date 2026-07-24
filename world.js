@@ -463,7 +463,7 @@ class TangibleWorld {
   }
 
   _openContact() {
-    window.location.href = "mailto:hello@designbysana.com?subject=Hi%20Tangible%20Studios";
+    window.location.href = "mailto:sanatangiblestudios@gmail.com?subject=Hi%20Tangible%20Studios";
   }
 
   openCoinPopup() {
