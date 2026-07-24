@@ -205,6 +205,8 @@ class TangibleWorld {
       this._treeFinishedCount = 0;
       this._floranaMixer.addEventListener("finished", () => {
         this._treeFinishedCount++;
+        const elapsed = Date.now() - (this._treeGrowthStartedAt || Date.now());
+        console.log(`[${Date.now()}] Florana mixer "finished" fired ${elapsed}ms after play started — count now ${this._treeFinishedCount} of ${this._treeClipActions.length}`);
         // Wait for all clips (trunk + leaves, etc.) to finish before
         // showing the sign, in case the model has more than one.
         if (this._treeFinishedCount >= this._treeClipActions.length) {
@@ -557,22 +559,20 @@ class TangibleWorld {
           node.position.copy(position);
           node.scale.copy(scale);
         });
-        const tree = this.floranaRoom.getObjectByName("tree");
-        if (tree) tree.scale.setScalar(0.001); // harmless fallback if no clips
         // Same trick as the seed: use the animation system itself to
         // snap back to frame zero rather than guessing what to reset.
+        // play() is needed here so the mixer actually treats the action
+        // as active and applies the frame-0 pose on update() below —
+        // stopAllAction() afterward then cleanly deactivates everything.
         (this._treeClipActions || []).forEach((action) => {
           action.reset();
+          action.time = 0;
+          action.enabled = true;
           action.paused = false;
           action.play();
         });
         if (this._floranaMixer) this._floranaMixer.update(0);
-        // Fully stop (not just pause) so the next play() call starts
-        // completely fresh — pausing alone left some internal state
-        // that was preventing a clean replay on the second visit.
-        (this._treeClipActions || []).forEach((action) => {
-          action.stop();
-        });
+        this._floranaMixer.stopAllAction();
         this._treeGrown = false;
         this._treeAnim = null;
         this._transitioning = false;
@@ -582,12 +582,20 @@ class TangibleWorld {
 
   _startTreeGrowth() {
     if (this._treeClipActions && this._treeClipActions.length > 0) {
-      // Use the model's own baked growth animation(s).
+      // stopAllAction() clears every bit of internal mixer state (fade,
+      // weight, timing) for every action — reset()/play() alone were
+      // leaving something behind that made the second playthrough finish
+      // almost instantly instead of actually animating.
+      this._floranaMixer.stopAllAction();
       this._treeFinishedCount = 0;
-      this._treeClipActions.forEach((action) => {
+      this._treeGrowthStartedAt = Date.now();
+      this._treeClipActions.forEach((action, i) => {
         action.reset();
+        action.time = 0;
+        action.enabled = true;
         action.paused = false;
         action.play();
+        console.log(`[${Date.now()}] _startTreeGrowth: action[${i}] after play — time=${action.time}, isRunning=${action.isRunning()}, clipDuration=${action.getClip().duration}`);
       });
       return;
     }

@@ -84,6 +84,11 @@
   }
   #coinPopup h3 { margin:0 0 8px; font-size:18px; }
   #coinPopup p { margin:0 0 4px; font-size:13px; line-height:1.5; color:#4a473f; }
+  #websiteLink {
+    display:inline-block; margin-top:14px; padding:11px 20px; border-radius:20px;
+    background: linear-gradient(135deg, #1e6ee1, #6ec3a5); color:#0d0d0c; font-weight:600;
+    font-size:13px; text-decoration:none;
+  }
   #coinPopup .closeRow { text-align:right; margin-top:14px; }
   #coinPopup .closeRow button {
     border:none; background:none; color:var(--ink); font-size:12px; text-decoration:underline; cursor:pointer;
@@ -143,9 +148,9 @@
 <!-- COIN POPUP -->
 <div id="coinPopup">
   <div class="eyebrow">Tangible Studios</div>
-  <h3>Design-led. Build-obsessed.</h3>
-  <p>We're a small studio designing and building interactive products — AR, web, and the space between them.</p>
-  <p>designbysana.com</p>
+  <h3>A cutting-edge studio leading AR design.</h3>
+  <p>We build new digital worlds — pushing what augmented reality can do for brands, products, and the spaces in between.</p>
+  <a href="https://tangiblear.com/" target="_blank" rel="noopener" id="websiteLink">Visit our website →</a>
   <div class="closeRow"><button id="closeCoinBtn">Close</button></div>
 </div>
 
@@ -167,7 +172,7 @@
 
 <script type="module">
 import * as THREE from "three";
-import { world } from "./world.js?v=58";
+import { world } from "./world.js?v=62";
 
 /* ---------------- Mode wiring ---------------- */
 const landing = document.getElementById("landing");
