@@ -166,15 +166,30 @@ class TangibleWorld {
     // Found via live console testing (see conversation) rather than
     // guessed 90° increments — this model's export apparently wasn't at
     // a clean axis-aligned angle, so it needed a precise value instead.
-    group.rotation.y = -1.61;
+    group.rotation.y = -1.62;
     group.position.x = 0.1;
     // This is a separate Blender export from the tech room, so it likely
     // has its own native scale — guessing small here since a huge flat
     // panel filling the screen was exactly what the tech room looked
     // like before its scale (not rotation) turned out to be the real fix.
-    group.scale.setScalar(0.3);
+    group.scale.setScalar(0.4);
 
     this._renameFirstMatch(group, ["tree003_4", "tree.003_4"], "tree");
+
+    // Most of this model's materials came through at metallic=1 (the
+    // glTF spec's DEFAULT value when metalness was never explicitly set
+    // in Blender) — fully metallic surfaces render almost black without
+    // an environment/reflection map, which we don't have. Forcing
+    // metalness down lets the actual base color textures show through
+    // properly instead of rendering as flat dark shapes.
+    group.traverse((obj) => {
+      if (!obj.isMesh || !obj.material) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach((m) => {
+        if (m.metalness !== undefined) m.metalness = 0;
+        if (m.roughness !== undefined) m.roughness = 0.8;
+      });
+    });
 
     // Your model has its own baked growth animation(s) — using those
     // directly instead of the manual scale-up placeholder animation,
