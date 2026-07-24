@@ -567,8 +567,11 @@ class TangibleWorld {
           action.play();
         });
         if (this._floranaMixer) this._floranaMixer.update(0);
+        // Fully stop (not just pause) so the next play() call starts
+        // completely fresh — pausing alone left some internal state
+        // that was preventing a clean replay on the second visit.
         (this._treeClipActions || []).forEach((action) => {
-          action.paused = true;
+          action.stop();
         });
         this._treeGrown = false;
         this._treeAnim = null;
