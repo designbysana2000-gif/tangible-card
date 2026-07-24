@@ -26,6 +26,7 @@ class TangibleWorld {
     this._clock = new THREE.Clock();
     this._seedFall = null; // { start, duration, target, startY, done }
     this._treeAnim = null; // { start, duration, done }
+    this._treeGrown = false;
     this._spin = null; // { start, duration, onDone }
     this._tmpPos = new THREE.Vector3();
     this._tmpQuat = new THREE.Quaternion();
@@ -43,10 +44,12 @@ class TangibleWorld {
     this.capsule.name = "capsule";
 
     this.techRoom = await this._buildTechRoom();
-    this.floranaRoom = this._buildFloranaRoom();
-    // Back-to-back: Florana's opening faces the opposite direction from
-    // the Tech Room's, sharing the same central spine.
-    this.floranaRoom.rotation.y = Math.PI;
+    this.floranaRoom = await this._buildFloranaRoom();
+    // (Previously forced to Math.PI here for the back-to-back capsule
+    // layout — but that was overwriting the specific rotation value
+    // tuned live for this exact model, undoing the fix. The tuned value
+    // set inside _buildFloranaRoom already accounts for everything
+    // needed, so this no longer applies any extra rotation.)
     // Hidden until the seed is planted and the capsule turns — this keeps
     // its (currently backless, placeholder) geometry from peeking through
     // before it's actually meant to be seen.
@@ -56,11 +59,25 @@ class TangibleWorld {
     root.add(this.capsule);
   }
 
-  async _buildTechRoom() {
+  // Shared loader setup with Draco decompression support attached — any
+  // GLB using Draco mesh compression (common once you compress textures/
+  // geometry for file size) needs this or it fails to load entirely.
+  async _createGLTFLoader() {
     const { GLTFLoader } = await import(
       "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
     );
+    const { DRACOLoader } = await import(
+      "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/DRACOLoader.js"
+    );
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/");
     const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);
+    return loader;
+  }
+
+  async _buildTechRoom() {
+    const loader = await this._createGLTFLoader();
     const gltf = await loader.loadAsync("./tech_room.glb?v=4");
     const group = gltf.scene;
     group.name = "techRoom";
@@ -129,38 +146,58 @@ class TangibleWorld {
       }
     });
     if (matchCount === 0) {
+      const allNames = [];
+      root.traverse((obj) => { if (obj.name) allNames.push(obj.name); });
       console.warn(`Could not find a node matching [${candidates.join(", ")}] for "${standardName}" — tapping it won't work until the name is fixed.`);
+      console.warn(`All ${allNames.length} node names actually present:`, allNames);
     }
   }
 
-  _buildFloranaRoom() {
-    const group = new THREE.Group();
+  async _buildFloranaRoom() {
+    const loader = await this._createGLTFLoader();
+    const gltf = await loader.loadAsync("./florana_room.glb?v=2");
+    const group = gltf.scene;
     group.name = "floranaRoom";
+    // (Earlier we tried re-centering based on the combined bounding box,
+    // but that was skewed by the tree object sitting far from the room —
+    // the room shell itself is already correctly centered at its own
+    // origin in the source file, so no re-centering is actually needed.)
 
-    // PLACEHOLDER GEOMETRY — swap for florana_room.glb
-    const floor = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.85, 0.85, 0.03, 40),
-      new THREE.MeshStandardMaterial({ color: 0xe9e3d3, roughness: 1 })
-    );
-    group.add(floor);
+    // Found via live console testing (see conversation) rather than
+    // guessed 90° increments — this model's export apparently wasn't at
+    // a clean axis-aligned angle, so it needed a precise value instead.
+    group.rotation.y = -1.61;
+    group.position.x = 0.1;
+    // This is a separate Blender export from the tech room, so it likely
+    // has its own native scale — guessing small here since a huge flat
+    // panel filling the screen was exactly what the tech room looked
+    // like before its scale (not rotation) turned out to be the real fix.
+    group.scale.setScalar(0.3);
 
-    // Tree: trunk + foliage, scaled to 0 initially for the growth animation
-    const tree = new THREE.Group();
-    tree.name = "tree";
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.025, 0.035, 0.35, 8),
-      new THREE.MeshStandardMaterial({ color: 0x6b4a33, roughness: 0.9 })
-    );
-    trunk.position.y = 0.175;
-    const foliage = new THREE.Mesh(
-      new THREE.SphereGeometry(0.22, 16, 16),
-      new THREE.MeshStandardMaterial({ color: 0x6f8f5a, roughness: 0.8 })
-    );
-    foliage.position.y = 0.42;
-    tree.add(trunk, foliage);
-    tree.scale.setScalar(0.001);
-    tree.position.y = 0.02;
-    group.add(tree);
+    this._renameFirstMatch(group, ["tree003_4", "tree.003_4"], "tree");
+
+    // Your model has its own baked growth animation(s) — using those
+    // directly instead of the manual scale-up placeholder animation,
+    // same approach that worked well for the seed.
+    if (gltf.animations && gltf.animations.length > 0) {
+      this._floranaMixer = new THREE.AnimationMixer(group);
+      this._treeClipActions = gltf.animations.map((clip) => {
+        const action = this._floranaMixer.clipAction(clip);
+        action.setLoop(THREE.LoopOnce);
+        action.clampWhenFinished = true;
+        return action;
+      });
+      this._treeFinishedCount = 0;
+      this._floranaMixer.addEventListener("finished", () => {
+        this._treeFinishedCount++;
+        // Wait for all clips (trunk + leaves, etc.) to finish before
+        // showing the sign, in case the model has more than one.
+        if (this._treeFinishedCount >= this._treeClipActions.length) {
+          this._showFloranaSign();
+          this._treeGrown = true;
+        }
+      });
+    }
 
     const light = new THREE.PointLight(0xffffff, 1, 3);
     light.position.set(0.3, 0.8, 0.3);
@@ -337,7 +374,7 @@ class TangibleWorld {
       if (hit.name === "contactCard") this._openContact();
       else if (hit.name === "coin") this.openCoinPopup();
       else if (hit.name === "seed") this._transitionToFlorana();
-      else if (hit.name === "tree" && this.currentRoom === "florana" && this._treeAnim && this._treeAnim.done) {
+      else if (hit.name === "tree" && this.currentRoom === "florana" && this._treeGrown) {
         this.goBackToTechRoom();
       }
     };
@@ -506,7 +543,19 @@ class TangibleWorld {
           node.scale.copy(scale);
         });
         const tree = this.floranaRoom.getObjectByName("tree");
-        if (tree) tree.scale.setScalar(0.001);
+        if (tree) tree.scale.setScalar(0.001); // harmless fallback if no clips
+        // Same trick as the seed: use the animation system itself to
+        // snap back to frame zero rather than guessing what to reset.
+        (this._treeClipActions || []).forEach((action) => {
+          action.reset();
+          action.paused = false;
+          action.play();
+        });
+        if (this._floranaMixer) this._floranaMixer.update(0);
+        (this._treeClipActions || []).forEach((action) => {
+          action.paused = true;
+        });
+        this._treeGrown = false;
         this._treeAnim = null;
         this._transitioning = false;
       },
@@ -514,6 +563,17 @@ class TangibleWorld {
   }
 
   _startTreeGrowth() {
+    if (this._treeClipActions && this._treeClipActions.length > 0) {
+      // Use the model's own baked growth animation(s).
+      this._treeFinishedCount = 0;
+      this._treeClipActions.forEach((action) => {
+        action.reset();
+        action.paused = false;
+        action.play();
+      });
+      return;
+    }
+    // Fallback if the model has no animation: manual scale-up.
     const tree = this.floranaRoom.getObjectByName("tree");
     if (!tree) return;
     this._treeAnim = {
@@ -541,6 +601,7 @@ class TangibleWorld {
     const dt = t - (this._lastTick || t);
     this._lastTick = t;
     if (this._techMixer) this._techMixer.update(dt);
+    if (this._floranaMixer) this._floranaMixer.update(dt);
 
     if (this._seedFall && !this._seedFall.done) {
       const k = Math.min(1, (t - this._seedFall.start) / this._seedFall.duration);

@@ -167,7 +167,7 @@
 
 <script type="module">
 import * as THREE from "three";
-import { world } from "./world.js?v=36";
+import { world } from "./world.js?v=53";
 
 /* ---------------- Mode wiring ---------------- */
 const landing = document.getElementById("landing");
@@ -199,6 +199,11 @@ document.getElementById("gotItBtn").addEventListener("click", async () => {
 backBtn.addEventListener("click", () => {
   world.goBackToTechRoom();
 });
+
+// Exposed globally on purpose — lets us tune the Florana room's rotation
+// live in the console (world.floranaRoom.rotation.y = ...) with instant
+// visual feedback, instead of a full edit/push/refresh cycle per guess.
+window.world = world;
 
 world.onRoomChange = (room) => {
   backBtn.style.display = room === "florana" ? "block" : "none";
