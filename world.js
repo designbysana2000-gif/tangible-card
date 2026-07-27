@@ -309,6 +309,19 @@ class TangibleWorld {
     const mindarThree = new MindARThree({
       container,
       imageTargetSrc: "./targets.mind",
+      // One-Euro filter tuning. MindAR's defaults (minCF 0.001 / beta 1000)
+      // favor responsiveness, which on a small handheld card reads as
+      // constant jitter — every tiny tracking error twitches the whole
+      // room. Lower values trade a touch of lag for a much steadier pose.
+      filterMinCF: 0.0002,
+      filterBeta: 10,
+      // Tolerances are in frames: keep showing the model through brief
+      // tracking dropouts (missTolerance) instead of blinking it out the
+      // instant the card is momentarily lost, and require a few good
+      // frames before showing it (warmupTolerance) so it doesn't flash
+      // at a garbage pose while tracking is still settling.
+      warmupTolerance: 3,
+      missTolerance: 10,
     });
     this._mindar = mindarThree;
     const { renderer, scene, camera } = mindarThree;
@@ -329,17 +342,58 @@ class TangibleWorld {
     // overhead phone angle instead of needing to hold the card upright.
     const stageUpright = new THREE.Group();
     stageUpright.rotation.x = Math.PI * 0.4; // ~72°, was a full 90°
-    // Bigger than before, and raised up off the card's surface — was
-    // sitting right at table height, which read as "too low."
-    stageUpright.scale.setScalar(0.5);
-    stageUpright.position.z = 0.2;
-    anchor.group.add(stageUpright);
+    // Build and fit BEFORE attaching to the anchor: _fitStageToCard
+    // measures world-space bounding boxes, so the stage's ancestors must
+    // all still be at identity for the measurement to equal stage space.
     await this._buildScene(stageUpright);
+    this._fitStageToCard(stageUpright);
+    anchor.group.add(stageUpright);
 
     this._bindPointer(renderer.domElement, camera);
 
     await mindarThree.start();
     renderer.setAnimationLoop(() => this._tick());
+  }
+
+  // Scales and positions the stage so the whole capsule (both rooms) sits
+  // on the card like a diorama, instead of at whatever raw size the GLBs
+  // happened to export at. In MindAR anchor space, 1 unit === the physical
+  // width of the tracked card, so all sizing here is in card-widths.
+  //
+  // The previous fixed numbers (scale 0.5, z +0.2) made the room ~2 card
+  // widths tall and pushed it 0.2 units toward the phone — at a normal
+  // viewing distance its walls filled the screen and crossed the camera's
+  // near clipping plane, which is exactly the "giant gray dome swallowing
+  // everything" from the screen recording.
+  //
+  // Must be called while the stage (or all of its ancestors) is still at
+  // identity, since Box3.setFromObject measures in world space.
+  _fitStageToCard(stage) {
+    // How wide the room should read relative to the card. ~1.25 keeps it
+    // clearly bigger than the card without towering into the camera.
+    const FOOTPRINT_CARD_WIDTHS = 1.25;
+
+    stage.updateWorldMatrix(true, true);
+    let box = new THREE.Box3().setFromObject(stage);
+    if (box.isEmpty()) return;
+    const size = box.getSize(new THREE.Vector3());
+
+    const scale = FOOTPRINT_CARD_WIDTHS / Math.max(size.x, 1e-6);
+    stage.scale.setScalar(scale);
+    stage.updateWorldMatrix(true, true);
+
+    // Re-measure at the final scale, then center the capsule over the
+    // card and rest its lowest point ON the card face (anchor +Z points
+    // up off the card).
+    box = new THREE.Box3().setFromObject(stage);
+    const center = box.getCenter(new THREE.Vector3());
+    stage.position.x -= center.x;
+    stage.position.y -= center.y;
+    stage.position.z -= box.min.z;
+    console.log(
+      `Stage fitted to card: raw footprint ${size.x.toFixed(2)} units wide → scale ${scale.toFixed(3)}, ` +
+      `now ${(size.x * scale).toFixed(2)} × ${(size.y * scale).toFixed(2)} card-widths, resting on the card face.`
+    );
   }
 
   /* ============================================================
@@ -418,30 +472,41 @@ class TangibleWorld {
     console.log(`Hit-target setup for "${name}": found ${nodes.length} matching node(s).`);
     nodes.forEach((node) => {
       const box = new THREE.Box3().setFromObject(node);
-      let radius = 0.06; // sensible fallback if the box comes back empty
-      let localCenter = new THREE.Vector3(0, 0, 0);
-      if (!box.isEmpty()) {
-        const size = new THREE.Vector3();
-        const worldCenter = new THREE.Vector3();
-        box.getSize(size);
-        box.getCenter(worldCenter);
-        radius = (Math.max(size.x, size.y, size.z) / 2) * paddingScale;
-        // Convert the geometry's real center into this node's own local
-        // space, since the node's pivot may not be at (0,0,0) visually.
-        localCenter = node.worldToLocal(worldCenter.clone());
-        console.log(`  "${node.name}" visual center is offset from its pivot by (${localCenter.x.toFixed(3)}, ${localCenter.y.toFixed(3)}, ${localCenter.z.toFixed(3)}) in local space.`);
-      } else {
-        console.log(`  "${node.name}" had an empty bounding box — using fallback radius, centered at pivot.`);
+      if (box.isEmpty()) {
+        // No visible geometry means nothing to tap. Some exports carry
+        // empty duplicate subtrees (this model has a geometry-less "seed"
+        // copy inside a node with a leftover 100× scale) — giving those a
+        // sphere used to create a gigantic invisible tap target that
+        // swallowed every tap anywhere near the room.
+        console.log(`  "${node.name}" has no visible geometry — skipping hit sphere.`);
+        return;
       }
+      const size = new THREE.Vector3();
+      const worldCenter = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(worldCenter);
+      const radius = (Math.max(size.x, size.y, size.z) / 2) * paddingScale;
+      // Convert the geometry's real center into this node's own local
+      // space, since the node's pivot may not be at (0,0,0) visually.
+      const localCenter = node.worldToLocal(worldCenter.clone());
+      console.log(`  "${node.name}" visual center is offset from its pivot by (${localCenter.x.toFixed(3)}, ${localCenter.y.toFixed(3)}, ${localCenter.z.toFixed(3)}) in local space.`);
+
+      // The sphere lives in the node's LOCAL space, so its geometry gets
+      // multiplied by the node's accumulated world scale — radius (a
+      // world-space measurement) must be divided back down, or a parent
+      // with a leftover export scale blows the sphere up by that factor.
+      const worldScale = node.getWorldScale(new THREE.Vector3());
+      const scaleFactor = Math.max(worldScale.x, worldScale.y, worldScale.z) || 1;
+      const localRadius = Math.max(radius, 0.15) / scaleFactor;
 
       const hitSphere = new THREE.Mesh(
-        new THREE.SphereGeometry(Math.max(radius, 0.15), 12, 12),
+        new THREE.SphereGeometry(localRadius, 12, 12),
         new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
       );
       hitSphere.name = name;
       hitSphere.position.copy(localCenter);
       node.add(hitSphere);
-      console.log(`  Added hit sphere (radius ${radius.toFixed(3)}) as a child of that node.`);
+      console.log(`  Added hit sphere (world radius ${Math.max(radius, 0.15).toFixed(3)}) as a child of that node.`);
     });
   }
 
