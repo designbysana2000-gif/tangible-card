@@ -319,9 +319,12 @@ class TangibleWorld {
       // tracking dropouts (missTolerance) instead of blinking it out the
       // instant the card is momentarily lost, and require a few good
       // frames before showing it (warmupTolerance) so it doesn't flash
-      // at a garbage pose while tracking is still settling.
+      // at a garbage pose while tracking is still settling. missTolerance
+      // is deliberately modest: during a dropout the model is FROZEN at
+      // its last pose while the real card keeps moving, so a long grace
+      // period reads as the room detaching from the card.
       warmupTolerance: 3,
-      missTolerance: 10,
+      missTolerance: 6,
     });
     this._mindar = mindarThree;
     const { renderer, scene, camera } = mindarThree;
@@ -373,14 +376,19 @@ class TangibleWorld {
   // response is continuous: steadier when still, looser when moving, with
   // no threshold anywhere to hop over.
   _smoothAnchorPose(dt) {
+    // Tuned for "locked to the card": smoothing only exists to kill the
+    // fine shimmer while the phone is held still. The moment the pose is
+    // genuinely moving, the filter must become transparent — an earlier
+    // version capped convergence at 5 Hz and let reacquires glide, which
+    // made the room visibly trail the card during motion (hanging in the
+    // air as a detached gray slab, clipping the camera) while it "found
+    // its place." MAX_CUTOFF 30 Hz ≈ sub-frame lag at 30fps: effectively
+    // glued to the tracked pose whenever it's moving at all.
     const MIN_CUTOFF = 0.5; // Hz — damping floor; lower = steadier when still
-    const BETA = 1.0;       // how quickly smoothing releases as speed rises
+    const BETA = 3.0;       // how quickly smoothing releases as speed rises
     const D_CUTOFF = 1.2;   // Hz — low-pass on the speed estimate itself, so
                             // one noisy frame can't kick the filter loose
-    const MAX_CUTOFF = 5;   // Hz — cap on convergence rate: big corrections
-                            // (e.g. reacquire) glide over ~0.2s, never teleport
-    const REACQUIRE_GRACE = 0.6; // s — dropouts shorter than this glide back;
-                                 // longer ones snap to the new pose instead
+    const MAX_CUTOFF = 30;  // Hz — high enough to be imperceptible lag
     dt = Math.max(dt, 1e-3);
     const alphaFor = (cutoff) => {
       const r = 2 * Math.PI * cutoff * dt;
@@ -389,11 +397,13 @@ class TangibleWorld {
 
     const g = this._anchor.group;
     if (!g.visible) {
-      this._poseHiddenFor = (this._poseHiddenFor || 0) + dt;
-      if (this._poseHiddenFor > REACQUIRE_GRACE) this._posePrimed = false;
+      // Tracking lost: forget the pose history entirely. When the card is
+      // found again the room must appear ON the card that same frame —
+      // gliding in from wherever it last was reads as the model floating
+      // free, which is the opposite of feeling locked to the card.
+      this._posePrimed = false;
       return;
     }
-    this._poseHiddenFor = 0;
 
     // MindAR's tracker can update slower than the render loop. If the
     // matrix still holds exactly what we composed last tick, there's no
