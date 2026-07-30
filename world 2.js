@@ -352,16 +352,7 @@ class TangibleWorld {
     // all still be at identity for the measurement to equal stage space.
     await this._buildScene(stageUpright);
     this._fitStageToCard(stageUpright);
-    // Facing pivot: spins the fitted stage around the card's normal so the
-    // room's opening points at the phone when tracking (re)starts, instead
-    // of always facing one fixed edge of the card — approaching from the
-    // wrong side used to greet you with the room's blank back wall. The
-    // fit above centered the capsule over the card, so this rotation keeps
-    // it seated in place. Actual angle is set in _faceCameraOnAcquire.
-    this._facing = new THREE.Group();
-    this._facing.add(stageUpright);
-    this._hasFaced = false;
-    anchor.group.add(this._facing);
+    anchor.group.add(stageUpright);
 
     this._bindPointer(renderer.domElement, camera);
 
@@ -432,10 +423,6 @@ class TangibleWorld {
       this._angSpeedF = 0;
       this._posePrimed = true;
       this._lastComposed = g.matrix.clone();
-      // First fresh pose after (re)acquiring the card — the one moment we
-      // know both where the card is and where the phone is, so turn the
-      // room's opening toward the viewer now.
-      this._faceCameraOnAcquire(g);
       return;
     }
 
@@ -462,31 +449,6 @@ class TangibleWorld {
     // and we smooth again.
     g.matrix.compose(this._smoothPos, this._smoothQuat, this._smoothScale);
     this._lastComposed = g.matrix.clone();
-  }
-
-  // Rotates the diorama around the card's normal so its open front faces
-  // wherever the phone actually is at the moment the card is (re)acquired.
-  // The room's front faces -Y in card space (the card's bottom edge), so
-  // the needed azimuth is measured from that direction.
-  _faceCameraOnAcquire(anchorGroup) {
-    if (!this._facing) return;
-    // The AR camera sits at the world origin, so its position in card
-    // space is the translation component of the inverted anchor matrix.
-    const camLocal = new THREE.Vector3().setFromMatrixPosition(
-      new THREE.Matrix4().copy(anchorGroup.matrix).invert()
-    );
-    // Phone nearly straight overhead — the azimuth is unstable and any
-    // facing is equally fine, so keep whatever we have.
-    if (Math.hypot(camLocal.x, camLocal.y) < 0.2) return;
-    const azimuth = Math.atan2(camLocal.x, -camLocal.y);
-    // Hysteresis: reacquiring after a micro-dropout from roughly the same
-    // spot must not visibly twist the room — only re-face when the viewer
-    // has genuinely moved to a different side of the card.
-    let delta = azimuth - this._facing.rotation.z;
-    delta = Math.atan2(Math.sin(delta), Math.cos(delta));
-    if (this._hasFaced && Math.abs(delta) < THREE.MathUtils.degToRad(25)) return;
-    this._facing.rotation.z = azimuth;
-    this._hasFaced = true;
   }
 
   // Scales and positions the stage so the whole capsule (both rooms) sits
