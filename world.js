@@ -466,8 +466,15 @@ class TangibleWorld {
 
   // Rotates the diorama around the card's normal so its open front faces
   // wherever the phone actually is at the moment the card is (re)acquired.
-  // The room's front faces -Y in card space (the card's bottom edge), so
-  // the needed azimuth is measured from that direction.
+  //
+  // Sign convention: determined EMPIRICALLY, not from theory. The first
+  // cut derived the card-space axes from MindAR's source (front at -Y,
+  // azimuth from atan2(x, -y)) and it came out exactly 180° wrong on a
+  // real device — every on-device recording showed the room's back wall
+  // from the normal viewing position. The formula below is that one
+  // rotated by π, which puts the opening toward the phone in on-device
+  // testing. If a future MindAR upgrade ever flips facing again, this
+  // sign is the knob.
   _faceCameraOnAcquire(anchorGroup) {
     if (!this._facing) return;
     // The AR camera sits at the world origin, so its position in card
@@ -478,7 +485,8 @@ class TangibleWorld {
     // Phone nearly straight overhead — the azimuth is unstable and any
     // facing is equally fine, so keep whatever we have.
     if (Math.hypot(camLocal.x, camLocal.y) < 0.2) return;
-    const azimuth = Math.atan2(camLocal.x, -camLocal.y);
+    const azimuth = Math.atan2(-camLocal.x, camLocal.y);
+    if (!Number.isFinite(azimuth)) return;
     // Hysteresis: reacquiring after a micro-dropout from roughly the same
     // spot must not visibly twist the room — only re-face when the viewer
     // has genuinely moved to a different side of the card.
