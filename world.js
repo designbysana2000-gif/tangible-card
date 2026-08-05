@@ -319,12 +319,9 @@ class TangibleWorld {
       // tracking dropouts (missTolerance) instead of blinking it out the
       // instant the card is momentarily lost, and require a few good
       // frames before showing it (warmupTolerance) so it doesn't flash
-      // at a garbage pose while tracking is still settling. missTolerance
-      // is deliberately modest: during a dropout the model is FROZEN at
-      // its last pose while the real card keeps moving, so a long grace
-      // period reads as the room detaching from the card.
+      // at a garbage pose while tracking is still settling.
       warmupTolerance: 3,
-      missTolerance: 6,
+      missTolerance: 10,
     });
     this._mindar = mindarThree;
     const { renderer, scene, camera } = mindarThree;
@@ -352,16 +349,7 @@ class TangibleWorld {
     // all still be at identity for the measurement to equal stage space.
     await this._buildScene(stageUpright);
     this._fitStageToCard(stageUpright);
-    // Facing pivot: spins the fitted stage around the card's normal so the
-    // room's opening points at the phone when tracking (re)starts, instead
-    // of always facing one fixed edge of the card — approaching from the
-    // wrong side used to greet you with the room's blank back wall. The
-    // fit above centered the capsule over the card, so this rotation keeps
-    // it seated in place. Actual angle is set in _faceCameraOnAcquire.
-    this._facing = new THREE.Group();
-    this._facing.add(stageUpright);
-    this._hasFaced = false;
-    anchor.group.add(this._facing);
+    anchor.group.add(stageUpright);
 
     this._bindPointer(renderer.domElement, camera);
 
@@ -385,19 +373,14 @@ class TangibleWorld {
   // response is continuous: steadier when still, looser when moving, with
   // no threshold anywhere to hop over.
   _smoothAnchorPose(dt) {
-    // Tuned for "locked to the card": smoothing only exists to kill the
-    // fine shimmer while the phone is held still. The moment the pose is
-    // genuinely moving, the filter must become transparent — an earlier
-    // version capped convergence at 5 Hz and let reacquires glide, which
-    // made the room visibly trail the card during motion (hanging in the
-    // air as a detached gray slab, clipping the camera) while it "found
-    // its place." MAX_CUTOFF 30 Hz ≈ sub-frame lag at 30fps: effectively
-    // glued to the tracked pose whenever it's moving at all.
     const MIN_CUTOFF = 0.5; // Hz — damping floor; lower = steadier when still
-    const BETA = 3.0;       // how quickly smoothing releases as speed rises
+    const BETA = 1.0;       // how quickly smoothing releases as speed rises
     const D_CUTOFF = 1.2;   // Hz — low-pass on the speed estimate itself, so
                             // one noisy frame can't kick the filter loose
-    const MAX_CUTOFF = 30;  // Hz — high enough to be imperceptible lag
+    const MAX_CUTOFF = 5;   // Hz — cap on convergence rate: big corrections
+                            // (e.g. reacquire) glide over ~0.2s, never teleport
+    const REACQUIRE_GRACE = 0.6; // s — dropouts shorter than this glide back;
+                                 // longer ones snap to the new pose instead
     dt = Math.max(dt, 1e-3);
     const alphaFor = (cutoff) => {
       const r = 2 * Math.PI * cutoff * dt;
@@ -406,13 +389,11 @@ class TangibleWorld {
 
     const g = this._anchor.group;
     if (!g.visible) {
-      // Tracking lost: forget the pose history entirely. When the card is
-      // found again the room must appear ON the card that same frame —
-      // gliding in from wherever it last was reads as the model floating
-      // free, which is the opposite of feeling locked to the card.
-      this._posePrimed = false;
+      this._poseHiddenFor = (this._poseHiddenFor || 0) + dt;
+      if (this._poseHiddenFor > REACQUIRE_GRACE) this._posePrimed = false;
       return;
     }
+    this._poseHiddenFor = 0;
 
     // MindAR's tracker can update slower than the render loop. If the
     // matrix still holds exactly what we composed last tick, there's no
@@ -432,10 +413,6 @@ class TangibleWorld {
       this._angSpeedF = 0;
       this._posePrimed = true;
       this._lastComposed = g.matrix.clone();
-      // First fresh pose after (re)acquiring the card — the one moment we
-      // know both where the card is and where the phone is, so turn the
-      // room's opening toward the viewer now.
-      this._faceCameraOnAcquire(g);
       return;
     }
 
@@ -462,39 +439,6 @@ class TangibleWorld {
     // and we smooth again.
     g.matrix.compose(this._smoothPos, this._smoothQuat, this._smoothScale);
     this._lastComposed = g.matrix.clone();
-  }
-
-  // Rotates the diorama around the card's normal so its open front faces
-  // wherever the phone actually is at the moment the card is (re)acquired.
-  //
-  // Sign convention: determined EMPIRICALLY, not from theory. The first
-  // cut derived the card-space axes from MindAR's source (front at -Y,
-  // azimuth from atan2(x, -y)) and it came out exactly 180° wrong on a
-  // real device — every on-device recording showed the room's back wall
-  // from the normal viewing position. The formula below is that one
-  // rotated by π, which puts the opening toward the phone in on-device
-  // testing. If a future MindAR upgrade ever flips facing again, this
-  // sign is the knob.
-  _faceCameraOnAcquire(anchorGroup) {
-    if (!this._facing) return;
-    // The AR camera sits at the world origin, so its position in card
-    // space is the translation component of the inverted anchor matrix.
-    const camLocal = new THREE.Vector3().setFromMatrixPosition(
-      new THREE.Matrix4().copy(anchorGroup.matrix).invert()
-    );
-    // Phone nearly straight overhead — the azimuth is unstable and any
-    // facing is equally fine, so keep whatever we have.
-    if (Math.hypot(camLocal.x, camLocal.y) < 0.2) return;
-    const azimuth = Math.atan2(-camLocal.x, camLocal.y);
-    if (!Number.isFinite(azimuth)) return;
-    // Hysteresis: reacquiring after a micro-dropout from roughly the same
-    // spot must not visibly twist the room — only re-face when the viewer
-    // has genuinely moved to a different side of the card.
-    let delta = azimuth - this._facing.rotation.z;
-    delta = Math.atan2(Math.sin(delta), Math.cos(delta));
-    if (this._hasFaced && Math.abs(delta) < THREE.MathUtils.degToRad(25)) return;
-    this._facing.rotation.z = azimuth;
-    this._hasFaced = true;
   }
 
   // Scales and positions the stage so the whole capsule (both rooms) sits
