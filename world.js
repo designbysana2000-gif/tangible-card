@@ -331,8 +331,6 @@ class TangibleWorld {
     this.camera = camera;
 
     const anchor = mindarThree.addAnchor(0);
-    this._anchor = anchor;
-    this._posePrimed = false;
 
     // The tracked image lies flat on the table with its anchor's Z axis
     // pointing straight up off the card. Our room is modeled Y-up (like
@@ -355,57 +353,6 @@ class TangibleWorld {
 
     await mindarThree.start();
     renderer.setAnimationLoop(() => this._tick());
-  }
-
-  // MindAR re-estimates the card's pose from scratch every camera frame,
-  // and consecutive estimates land a hair apart — which the eye reads as
-  // a constant fine shake, especially at the top of the room (small
-  // angular error × distance from the card). This smooths the anchor's
-  // tracked pose with an exponential moving average whose strength adapts
-  // to how fast the pose is actually changing: near-still poses get heavy
-  // damping (kills the shimmer), deliberate motion gets light damping (so
-  // the room doesn't visibly drag behind the card when you move around).
-  _smoothAnchorPose(dt) {
-    const g = this._anchor.group;
-    // Target lost: MindAR hides the group. Drop our history so the next
-    // reacquire snaps straight to the new pose instead of gliding across
-    // the screen from wherever the card was last seen.
-    if (!g.visible) {
-      this._posePrimed = false;
-      return;
-    }
-
-    g.matrix.decompose(this._tmpPos, this._tmpQuat, this._tmpScale);
-
-    if (!this._posePrimed) {
-      this._smoothPos = this._tmpPos.clone();
-      this._smoothQuat = this._tmpQuat.clone();
-      this._smoothScale = this._tmpScale.clone();
-      this._posePrimed = true;
-      return;
-    }
-
-    // Pose speed = translation speed plus rotation speed (weighted —
-    // angular error is what wobbles the room's roof the most). Units are
-    // card-widths/sec and radians/sec.
-    const posSpeed = this._smoothPos.distanceTo(this._tmpPos) / Math.max(dt, 1e-3);
-    const angSpeed = 2 * Math.acos(Math.min(1, Math.abs(this._smoothQuat.dot(this._tmpQuat)))) / Math.max(dt, 1e-3);
-    const speed = posSpeed + angSpeed * 0.5;
-
-    // Map speed → smoothing time constant: ~0.25s of damping when still,
-    // easing down to ~0.04s once the phone is clearly being moved.
-    const tau = THREE.MathUtils.clamp(0.25 - speed * 0.35, 0.04, 0.25);
-    const alpha = 1 - Math.exp(-dt / Math.max(tau, 1e-3));
-
-    this._smoothPos.lerp(this._tmpPos, alpha);
-    this._smoothQuat.slerp(this._tmpQuat, alpha);
-    this._smoothScale.lerp(this._tmpScale, alpha);
-
-    // Write the smoothed pose back. MindAR drives this matrix directly
-    // (matrixAutoUpdate is off), so composing into .matrix is exactly the
-    // channel it uses — next frame it overwrites with a fresh raw pose
-    // and we smooth again.
-    g.matrix.compose(this._smoothPos, this._smoothQuat, this._smoothScale);
   }
 
   // Scales and positions the stage so the whole capsule (both rooms) sits
@@ -744,7 +691,6 @@ class TangibleWorld {
     // silently break one of them.
     const dt = t - (this._lastTick || t);
     this._lastTick = t;
-    if (this.mode === "ar" && this._anchor) this._smoothAnchorPose(dt);
     if (this._techMixer) this._techMixer.update(dt);
     if (this._floranaMixer) this._floranaMixer.update(dt);
 
