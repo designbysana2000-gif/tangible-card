@@ -361,45 +361,19 @@ class TangibleWorld {
   // and consecutive estimates land a hair apart — which the eye reads as
   // a constant fine shake, especially at the top of the room (small
   // angular error × distance from the card). This smooths the anchor's
-  // tracked pose with a One-Euro-style adaptive low-pass filter.
-  //
-  // Why One-Euro specifically: an earlier version here adapted its damping
-  // from the ERROR between the smoothed and raw pose. That behaves like a
-  // threshold — small drift gets frozen out until the accumulated error is
-  // big enough to trip the "moving" mode, at which point the filter goes
-  // light and closes half the gap in a single frame. On screen that's a
-  // freeze → hop → freeze cycle (the "jumping bean"). One-Euro instead
-  // adapts from the low-passed VELOCITY of the raw pose itself, so its
-  // response is continuous: steadier when still, looser when moving, with
-  // no threshold anywhere to hop over.
+  // tracked pose with an exponential moving average whose strength adapts
+  // to how fast the pose is actually changing: near-still poses get heavy
+  // damping (kills the shimmer), deliberate motion gets light damping (so
+  // the room doesn't visibly drag behind the card when you move around).
   _smoothAnchorPose(dt) {
-    const MIN_CUTOFF = 0.5; // Hz — damping floor; lower = steadier when still
-    const BETA = 1.0;       // how quickly smoothing releases as speed rises
-    const D_CUTOFF = 1.2;   // Hz — low-pass on the speed estimate itself, so
-                            // one noisy frame can't kick the filter loose
-    const MAX_CUTOFF = 5;   // Hz — cap on convergence rate: big corrections
-                            // (e.g. reacquire) glide over ~0.2s, never teleport
-    const REACQUIRE_GRACE = 0.6; // s — dropouts shorter than this glide back;
-                                 // longer ones snap to the new pose instead
-    dt = Math.max(dt, 1e-3);
-    const alphaFor = (cutoff) => {
-      const r = 2 * Math.PI * cutoff * dt;
-      return r / (r + 1);
-    };
-
     const g = this._anchor.group;
+    // Target lost: MindAR hides the group. Drop our history so the next
+    // reacquire snaps straight to the new pose instead of gliding across
+    // the screen from wherever the card was last seen.
     if (!g.visible) {
-      this._poseHiddenFor = (this._poseHiddenFor || 0) + dt;
-      if (this._poseHiddenFor > REACQUIRE_GRACE) this._posePrimed = false;
+      this._posePrimed = false;
       return;
     }
-    this._poseHiddenFor = 0;
-
-    // MindAR's tracker can update slower than the render loop. If the
-    // matrix still holds exactly what we composed last tick, there's no
-    // new measurement — smoothing against our own output would corrupt
-    // the velocity estimate with self-echo, so skip until fresh data.
-    if (this._lastComposed && g.matrix.equals(this._lastComposed)) return;
 
     g.matrix.decompose(this._tmpPos, this._tmpQuat, this._tmpScale);
 
@@ -407,38 +381,31 @@ class TangibleWorld {
       this._smoothPos = this._tmpPos.clone();
       this._smoothQuat = this._tmpQuat.clone();
       this._smoothScale = this._tmpScale.clone();
-      this._rawPrevPos = this._tmpPos.clone();
-      this._rawPrevQuat = this._tmpQuat.clone();
-      this._posSpeedF = 0;
-      this._angSpeedF = 0;
       this._posePrimed = true;
-      this._lastComposed = g.matrix.clone();
       return;
     }
 
-    // Velocity of the RAW pose (card-widths/s and rad/s), each low-passed
-    // before use — this is what makes the adaptation continuous.
-    const posSpeed = this._tmpPos.distanceTo(this._rawPrevPos) / dt;
-    const angSpeed = 2 * Math.acos(Math.min(1, Math.abs(this._tmpQuat.dot(this._rawPrevQuat)))) / dt;
-    const dAlpha = alphaFor(D_CUTOFF);
-    this._posSpeedF += (posSpeed - this._posSpeedF) * dAlpha;
-    this._angSpeedF += (angSpeed - this._angSpeedF) * dAlpha;
-    this._rawPrevPos.copy(this._tmpPos);
-    this._rawPrevQuat.copy(this._tmpQuat);
+    // Pose speed = translation speed plus rotation speed (weighted —
+    // angular error is what wobbles the room's roof the most). Units are
+    // card-widths/sec and radians/sec.
+    const posSpeed = this._smoothPos.distanceTo(this._tmpPos) / Math.max(dt, 1e-3);
+    const angSpeed = 2 * Math.acos(Math.min(1, Math.abs(this._smoothQuat.dot(this._tmpQuat)))) / Math.max(dt, 1e-3);
+    const speed = posSpeed + angSpeed * 0.5;
 
-    const posAlpha = alphaFor(THREE.MathUtils.clamp(MIN_CUTOFF + BETA * this._posSpeedF, MIN_CUTOFF, MAX_CUTOFF));
-    const rotAlpha = alphaFor(THREE.MathUtils.clamp(MIN_CUTOFF + BETA * this._angSpeedF, MIN_CUTOFF, MAX_CUTOFF));
+    // Map speed → smoothing time constant: ~0.25s of damping when still,
+    // easing down to ~0.04s once the phone is clearly being moved.
+    const tau = THREE.MathUtils.clamp(0.25 - speed * 0.35, 0.04, 0.25);
+    const alpha = 1 - Math.exp(-dt / Math.max(tau, 1e-3));
 
-    this._smoothPos.lerp(this._tmpPos, posAlpha);
-    this._smoothQuat.slerp(this._tmpQuat, rotAlpha);
-    this._smoothScale.lerp(this._tmpScale, posAlpha);
+    this._smoothPos.lerp(this._tmpPos, alpha);
+    this._smoothQuat.slerp(this._tmpQuat, alpha);
+    this._smoothScale.lerp(this._tmpScale, alpha);
 
     // Write the smoothed pose back. MindAR drives this matrix directly
     // (matrixAutoUpdate is off), so composing into .matrix is exactly the
     // channel it uses — next frame it overwrites with a fresh raw pose
     // and we smooth again.
     g.matrix.compose(this._smoothPos, this._smoothQuat, this._smoothScale);
-    this._lastComposed = g.matrix.clone();
   }
 
   // Scales and positions the stage so the whole capsule (both rooms) sits
